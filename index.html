@@ -187,28 +187,6 @@
       <div class="log-entry"><span class="log-time">21:40</span><span class="log-msg ok">✓ UNSW portal login successful</span></div>
     </div>
   </div>
-
-  <div class="task-section">
-    <div class="section-title">Control Panel</div>
-    <div class="control-panel">
-      <div class="control-locked" id="control-locked">
-        <p>🔒 AUTHORISATION REQUIRED</p>
-        <div class="pw-form">
-          <input type="password" class="pw-input" id="pw-input" placeholder="Enter password" onkeydown="if(event.key==='Enter')unlock()"/>
-          <button class="btn btn-unlock" onclick="unlock()">UNLOCK</button>
-        </div>
-        <div class="pw-error" id="pw-error">⚠ Invalid password</div>
-      </div>
-      <div class="control-unlocked" id="control-unlocked">
-        <p>🔓 AUTHORISED — Full system control enabled</p>
-        <div class="control-buttons">
-          <button class="btn btn-start" onclick="sendCmd('start')">▶ START</button>
-          <button class="btn btn-restart" onclick="sendCmd('restart')">↺ RESTART</button>
-          <button class="btn btn-stop" onclick="sendCmd('stop')">■ STOP</button>
-        </div>
-        <div class="control-status" id="ctrl-status">Ready. Select a command.</div>
-      </div>
-    </div>
   </div>
 
   <footer>
@@ -221,7 +199,7 @@
 
 <script>
   const API = 'https://sagem-county-favourites-devon.trycloudflare.com';
-  let password = '';
+  
 
   function pad(n) { return String(n).padStart(2,'0'); }
 

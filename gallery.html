@@ -12,28 +12,41 @@
       background-size:40px 40px; z-index:0; }
     .container { position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:40px 20px; }
 
-    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:48px; border-bottom:1px solid #b41e1e44; padding-bottom:24px; }
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:40px; border-bottom:1px solid #b41e1e44; padding-bottom:24px; flex-wrap:wrap; gap:16px; }
     header h1 { font-size:2rem; font-weight:900; letter-spacing:.2em; color:#fff; text-shadow:0 0 20px #b41e1e; }
     header .subtitle { color:#b41e1e; font-size:.75rem; letter-spacing:.3em; margin-top:4px; }
     .nav-back { color:#b41e1e; text-decoration:none; font-size:.8rem; letter-spacing:.15em; border:1px solid #b41e1e44; padding:8px 16px; border-radius:4px; transition:all .2s; }
     .nav-back:hover { border-color:#b41e1e; background:#b41e1e22; }
 
-    .gallery-grid { columns:3 280px; gap:16px; }
+    /* Upload zone */
+    .upload-zone { border:2px dashed #b41e1e44; border-radius:8px; padding:32px; text-align:center; margin-bottom:36px; cursor:pointer; transition:all .3s; position:relative; }
+    .upload-zone:hover, .upload-zone.drag { border-color:#b41e1e; background:#b41e1e0a; }
+    .upload-zone input { position:absolute; top:0;left:0;right:0;bottom:0; opacity:0; cursor:pointer; width:100%; }
+    .upload-zone .icon { font-size:2rem; margin-bottom:8px; }
+    .upload-zone p { color:#666; font-size:.8rem; letter-spacing:.15em; }
+    .upload-zone p span { color:#b41e1e; }
+    .upload-btn { margin-top:16px; background:#b41e1e; color:#fff; border:none; padding:10px 28px; border-radius:4px; font-family:'Courier New',monospace; font-size:.85rem; letter-spacing:.1em; cursor:pointer; font-weight:bold; transition:all .2s; display:none; }
+    .upload-btn:hover { background:#d42020; box-shadow:0 0 12px #b41e1e88; }
+    .upload-status { margin-top:12px; font-size:.78rem; min-height:20px; }
+    .upload-status.ok { color:#4ade80; }
+    .upload-status.err { color:#f87171; }
+    .upload-status.loading { color:#b41e1e; }
+
+    /* Gallery */
+    .gallery-grid { columns:3 260px; gap:16px; }
     .gallery-item { break-inside:avoid; margin-bottom:16px; border-radius:8px; overflow:hidden; border:1px solid #b41e1e22; cursor:pointer; transition:all .3s; position:relative; }
     .gallery-item:hover { border-color:#b41e1e88; transform:scale(1.02); box-shadow:0 0 24px #b41e1e44; }
     .gallery-item img { width:100%; display:block; }
     .gallery-item .overlay { position:absolute; bottom:0;left:0;right:0; background:linear-gradient(transparent,#0a0a0fcc); padding:16px; opacity:0; transition:opacity .3s; font-size:.75rem; color:#b41e1e; letter-spacing:.1em; }
     .gallery-item:hover .overlay { opacity:1; }
 
-    /* Lightbox */
-    .lightbox { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:#000000cc; z-index:999; align-items:center; justify-content:center; }
+    .lightbox { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:#000000dd; z-index:999; align-items:center; justify-content:center; }
     .lightbox.open { display:flex; }
     .lightbox img { max-width:90vw; max-height:90vh; border-radius:8px; border:1px solid #b41e1e44; box-shadow:0 0 60px #b41e1e44; }
-    .lightbox-close { position:absolute; top:24px; right:32px; font-size:2rem; color:#b41e1e; cursor:pointer; line-height:1; }
+    .lightbox-close { position:absolute; top:24px; right:32px; font-size:2rem; color:#b41e1e; cursor:pointer; }
     .lightbox-close:hover { color:#fff; }
 
     footer { text-align:center; font-size:.7rem; color:#333; letter-spacing:.2em; margin-top:48px; padding-top:20px; border-top:1px solid #b41e1e22; }
-    footer span { color:#b41e1e; }
   </style>
 </head>
 <body>
@@ -46,17 +59,26 @@
     <a href="/" class="nav-back">← BACK TO STATUS</a>
   </header>
 
-  <div class="gallery-grid">
+  <div class="upload-zone" id="upload-zone">
+    <input type="file" id="file-input" accept="image/*" multiple onchange="handleFiles(this.files)"/>
+    <div class="icon">📸</div>
+    <p>Drop photos here or <span>click to browse</span></p>
+    <p style="margin-top:6px;font-size:.7rem">Anyone can upload — JPG, PNG, GIF, WEBP</p>
+    <button class="upload-btn" id="upload-btn" onclick="uploadFiles(event)">UPLOAD TO SITE</button>
+    <div class="upload-status" id="upload-status"></div>
+  </div>
+
+  <div class="gallery-grid" id="gallery-grid">
     <div class="gallery-item" onclick="openLightbox('photos/photo1.jpg')">
-      <img src="photos/photo1.jpg" alt="Photo 1"/>
+      <img src="photos/photo1.jpg" alt="Photo 1" loading="lazy"/>
       <div class="overlay">PHOTO 01</div>
     </div>
     <div class="gallery-item" onclick="openLightbox('photos/photo2.png')">
-      <img src="photos/photo2.png" alt="Photo 2"/>
+      <img src="photos/photo2.png" alt="Photo 2" loading="lazy"/>
       <div class="overlay">PHOTO 02</div>
     </div>
     <div class="gallery-item" onclick="openLightbox('photos/photo3.png')">
-      <img src="photos/photo3.png" alt="Photo 3"/>
+      <img src="photos/photo3.png" alt="Photo 3" loading="lazy"/>
       <div class="overlay">PHOTO 03</div>
     </div>
   </div>
@@ -68,13 +90,68 @@
 </div>
 
 <script>
+  const API = 'https://sagem-county-favourites-devon.trycloudflare.com';
+  let pendingFiles = [];
+
+  const zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag'); handleFiles(e.dataTransfer.files); });
+
+  function handleFiles(files) {
+    pendingFiles = Array.from(files);
+    if (pendingFiles.length > 0) {
+      document.getElementById('upload-btn').style.display = 'inline-block';
+      document.getElementById('upload-status').textContent = `${pendingFiles.length} file(s) selected`;
+      document.getElementById('upload-status').className = 'upload-status';
+    }
+  }
+
+  async function uploadFiles(e) {
+    e.stopPropagation();
+    if (!pendingFiles.length) return;
+    const btn = document.getElementById('upload-btn');
+    const status = document.getElementById('upload-status');
+    btn.disabled = true;
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      status.className = 'upload-status loading';
+      status.textContent = `Uploading ${file.name} (${i+1}/${pendingFiles.length})...`;
+      const base64 = await toBase64(file);
+      try {
+        const r = await fetch(API + '/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, data: base64 })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error);
+      } catch(err) {
+        status.className = 'upload-status err';
+        status.textContent = `✗ Error: ${err.message}`;
+        btn.disabled = false;
+        return;
+      }
+    }
+    status.className = 'upload-status ok';
+    status.textContent = `✓ Uploaded! Refreshing in 3s...`;
+    setTimeout(() => location.reload(), 3000);
+  }
+
+  function toBase64(file) {
+    return new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+  }
+
   function openLightbox(src) {
     document.getElementById('lightbox-img').src = src;
     document.getElementById('lightbox').classList.add('open');
   }
-  function closeLightbox() {
-    document.getElementById('lightbox').classList.remove('open');
-  }
+  function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
   document.addEventListener('keydown', e => { if(e.key==='Escape') closeLightbox(); });
 </script>
 </body>
