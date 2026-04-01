@@ -58,6 +58,7 @@
 
     footer { text-align:center; font-size:.65rem; color:#333; margin-top:36px; padding-top:16px; border-top:1px solid #b41e1e22; }
   </style>
+<script>var COMMENTS_API='https://sagem-county-favourites-devon.trycloudflare.com';</script>
 </head>
 <body>
 <div class="container">
@@ -212,5 +213,53 @@
 </script>
 
 <footer>ULTRON v1.0 — kogyjut.github.io</footer>
+
+<div id="lb-overlay" style="display:none;position:fixed;inset:0;background:#000a;z-index:1000;overflow-y:auto;padding:20px" onclick="if(event.target===this)closeLb()">
+  <div style="max-width:600px;margin:40px auto;background:#0f0f18;border:1px solid #b41e1e44;border-radius:8px;overflow:hidden">
+    <div style="position:relative">
+      <img id="lb-img" src="" style="width:100%;display:block"/>
+      <button onclick="closeLb()" style="position:absolute;top:10px;right:10px;background:#b41e1e;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:1rem">✕</button>
+    </div>
+    <div style="padding:20px">
+      <div style="font-size:.7rem;letter-spacing:.2em;color:#b41e1e;text-transform:uppercase;margin-bottom:12px">Comments</div>
+      <div id="lb-comments" style="font-size:.82rem;line-height:1.8;color:#ccc;margin-bottom:16px;min-height:40px"></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input id="lb-name" placeholder="Your name" maxlength="60" style="background:#0a0a0f;border:1px solid #b41e1e44;border-radius:4px;color:#fff;padding:8px 12px;font-family:monospace;font-size:.85rem;outline:none"/>
+        <textarea id="lb-text" placeholder="Leave a comment..." maxlength="500" rows="3" style="background:#0a0a0f;border:1px solid #b41e1e44;border-radius:4px;color:#fff;padding:8px 12px;font-family:monospace;font-size:.85rem;outline:none;resize:vertical"></textarea>
+        <button onclick="submitComment()" style="background:#b41e1e;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-family:monospace;font-size:.85rem;font-weight:bold">POST COMMENT</button>
+        <div id="lb-status" style="font-size:.75rem;color:#888;text-align:center;min-height:18px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+var _lbPhoto='';
+function openLightbox(src,photo){
+  _lbPhoto=photo;
+  document.getElementById('lb-img').src=src;
+  document.getElementById('lb-overlay').style.display='block';
+  document.getElementById('lb-comments').innerHTML='Loading...';
+  document.getElementById('lb-status').textContent='';
+  fetch(COMMENTS_API+'/comments?photo='+encodeURIComponent(photo)).then(r=>r.json()).then(d=>{
+    var html=d.comments.length?d.comments.map(c=>'<div style="border-bottom:1px solid #b41e1e22;padding:6px 0"><span style="color:#b41e1e">'+esc(c.name)+'</span> <span style="color:#444;font-size:.7rem">'+c.at.slice(0,10)+'</span><br>'+esc(c.text)+'</div>').join(''):'<span style="color:#444">No comments yet.</span>';
+    document.getElementById('lb-comments').innerHTML=html;
+  }).catch(()=>{document.getElementById('lb-comments').innerHTML='<span style="color:#f87171">Could not load comments.</span>';});
+}
+function closeLb(){document.getElementById('lb-overlay').style.display='none';}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function submitComment(){
+  var name=document.getElementById('lb-name').value.trim();
+  var text=document.getElementById('lb-text').value.trim();
+  var st=document.getElementById('lb-status');
+  if(!name||!text){st.style.color='#f87171';st.textContent='Name and comment required.';return;}
+  st.style.color='#888';st.textContent='Posting...';
+  fetch(COMMENTS_API+'/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo:_lbPhoto,name,text})})
+    .then(r=>r.json()).then(()=>{
+      st.style.color='#4ade80';st.textContent='Posted!';
+      document.getElementById('lb-text').value='';
+      openLightbox(document.getElementById('lb-img').src,_lbPhoto);
+    }).catch(()=>{st.style.color='#f87171';st.textContent='Failed to post.';});
+}
+</script>
 </body>
 </html>
