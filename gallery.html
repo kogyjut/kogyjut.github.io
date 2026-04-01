@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ULTRON — Gallery</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#0a0a0f; color:#e0e0e0; font-family:'Courier New',monospace; min-height:100vh; }
+    body::before { content:''; position:fixed; top:0;left:0;right:0;bottom:0;
+      background-image:linear-gradient(rgba(180,30,30,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(180,30,30,0.05) 1px,transparent 1px);
+      background-size:40px 40px; z-index:0; }
+    .container { position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:40px 20px; }
+
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:48px; border-bottom:1px solid #b41e1e44; padding-bottom:24px; }
+    header h1 { font-size:2rem; font-weight:900; letter-spacing:.2em; color:#fff; text-shadow:0 0 20px #b41e1e; }
+    header .subtitle { color:#b41e1e; font-size:.75rem; letter-spacing:.3em; margin-top:4px; }
+    .nav-back { color:#b41e1e; text-decoration:none; font-size:.8rem; letter-spacing:.15em; border:1px solid #b41e1e44; padding:8px 16px; border-radius:4px; transition:all .2s; }
+    .nav-back:hover { border-color:#b41e1e; background:#b41e1e22; }
+
+    .gallery-grid { columns:3 280px; gap:16px; }
+    .gallery-item { break-inside:avoid; margin-bottom:16px; border-radius:8px; overflow:hidden; border:1px solid #b41e1e22; cursor:pointer; transition:all .3s; position:relative; }
+    .gallery-item:hover { border-color:#b41e1e88; transform:scale(1.02); box-shadow:0 0 24px #b41e1e44; }
+    .gallery-item img { width:100%; display:block; }
+    .gallery-item .overlay { position:absolute; bottom:0;left:0;right:0; background:linear-gradient(transparent,#0a0a0fcc); padding:16px; opacity:0; transition:opacity .3s; font-size:.75rem; color:#b41e1e; letter-spacing:.1em; }
+    .gallery-item:hover .overlay { opacity:1; }
+
+    /* Lightbox */
+    .lightbox { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:#000000cc; z-index:999; align-items:center; justify-content:center; }
+    .lightbox.open { display:flex; }
+    .lightbox img { max-width:90vw; max-height:90vh; border-radius:8px; border:1px solid #b41e1e44; box-shadow:0 0 60px #b41e1e44; }
+    .lightbox-close { position:absolute; top:24px; right:32px; font-size:2rem; color:#b41e1e; cursor:pointer; line-height:1; }
+    .lightbox-close:hover { color:#fff; }
+
+    footer { text-align:center; font-size:.7rem; color:#333; letter-spacing:.2em; margin-top:48px; padding-top:20px; border-top:1px solid #b41e1e22; }
+    footer span { color:#b41e1e; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>GALLERY</h1>
+      <div class="subtitle">NATHAN VASU — PERSONAL</div>
+    </div>
+    <a href="/" class="nav-back">← BACK TO STATUS</a>
+  </header>
+
+  <div class="gallery-grid">
+    <div class="gallery-item" onclick="openLightbox('photos/photo1.jpg')">
+      <img src="photos/photo1.jpg" alt="Photo 1"/>
+      <div class="overlay">PHOTO 01</div>
+    </div>
+    <div class="gallery-item" onclick="openLightbox('photos/photo2.png')">
+      <img src="photos/photo2.png" alt="Photo 2"/>
+      <div class="overlay">PHOTO 02</div>
+    </div>
+    <div class="gallery-item" onclick="openLightbox('photos/photo3.png')">
+      <img src="photos/photo3.png" alt="Photo 3"/>
+      <div class="overlay">PHOTO 03</div>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close">✕</span>
+  <img id="lightbox-img" src="" alt=""/>
+</div>
+
+<script>
+  function openLightbox(src) {
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('open');
+  }
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if(e.key==='Escape') closeLightbox(); });
+</script>
+</body>
+</html>
