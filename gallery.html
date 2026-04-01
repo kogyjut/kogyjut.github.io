@@ -2,51 +2,61 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>ULTRON — Gallery</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
     body { background:#0a0a0f; color:#e0e0e0; font-family:'Courier New',monospace; min-height:100vh; }
-    body::before { content:''; position:fixed; top:0;left:0;right:0;bottom:0;
-      background-image:linear-gradient(rgba(180,30,30,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(180,30,30,0.05) 1px,transparent 1px);
-      background-size:40px 40px; z-index:0; }
-    .container { position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:40px 20px; }
+    .container { max-width:1100px; margin:0 auto; padding:20px 16px; }
 
-    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:40px; border-bottom:1px solid #b41e1e44; padding-bottom:24px; flex-wrap:wrap; gap:16px; }
-    header h1 { font-size:2rem; font-weight:900; letter-spacing:.2em; color:#fff; text-shadow:0 0 20px #b41e1e; }
-    header .subtitle { color:#b41e1e; font-size:.75rem; letter-spacing:.3em; margin-top:4px; }
-    .nav-back { color:#b41e1e; text-decoration:none; font-size:.8rem; letter-spacing:.15em; border:1px solid #b41e1e44; padding:8px 16px; border-radius:4px; transition:all .2s; }
-    .nav-back:hover { border-color:#b41e1e; background:#b41e1e22; }
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; border-bottom:1px solid #b41e1e44; padding-bottom:20px; }
+    header h1 { font-size:1.6rem; font-weight:900; letter-spacing:.15em; color:#fff; text-shadow:0 0 20px #b41e1e; }
+    header .subtitle { color:#b41e1e; font-size:.7rem; letter-spacing:.2em; margin-top:4px; }
+    .nav-back { color:#b41e1e; text-decoration:none; font-size:.85rem; padding:12px 20px; border:1px solid #b41e1e44; border-radius:6px; display:inline-block; min-width:44px; min-height:44px; line-height:1; }
+    .nav-back:active { background:#b41e1e22; }
 
-    /* Upload zone */
-    .upload-zone { border:2px dashed #b41e1e44; border-radius:8px; padding:32px; text-align:center; margin-bottom:36px; cursor:pointer; transition:all .3s; position:relative; }
-    .upload-zone:hover, .upload-zone.drag { border-color:#b41e1e; background:#b41e1e0a; }
-    .upload-zone input { position:absolute; top:0;left:0;right:0;bottom:0; opacity:0; cursor:pointer; width:100%; }
+    .upload-zone { border:2px dashed #b41e1e44; border-radius:8px; padding:28px 16px; text-align:center; margin-bottom:28px; position:relative; }
+    .upload-zone input { position:absolute; top:0;left:0;right:0;bottom:0; opacity:0; width:100%; height:100%; cursor:pointer; }
     .upload-zone .icon { font-size:2rem; margin-bottom:8px; }
-    .upload-zone p { color:#666; font-size:.8rem; letter-spacing:.15em; }
+    .upload-zone p { color:#666; font-size:.8rem; }
     .upload-zone p span { color:#b41e1e; }
-    .upload-btn { margin-top:16px; background:#b41e1e; color:#fff; border:none; padding:10px 28px; border-radius:4px; font-family:'Courier New',monospace; font-size:.85rem; letter-spacing:.1em; cursor:pointer; font-weight:bold; transition:all .2s; display:none; }
-    .upload-btn:hover { background:#d42020; box-shadow:0 0 12px #b41e1e88; }
-    .upload-status { margin-top:12px; font-size:.78rem; min-height:20px; }
-    .upload-status.ok { color:#4ade80; }
-    .upload-status.err { color:#f87171; }
-    .upload-status.loading { color:#b41e1e; }
+    .upload-btn { margin-top:14px; background:#b41e1e; color:#fff; border:none; padding:14px 32px; border-radius:6px; font-family:inherit; font-size:.9rem; font-weight:bold; min-height:48px; min-width:120px; display:none; position:relative; z-index:2; }
+    .upload-btn:active { background:#d42020; }
+    .upload-status { margin-top:10px; font-size:.78rem; min-height:20px; }
+    .upload-status.ok { color:#4ade80; } .upload-status.err { color:#f87171; } .upload-status.loading { color:#b41e1e; }
 
-    /* Gallery */
-    .gallery-grid { columns:3 260px; gap:16px; }
-    .gallery-item { break-inside:avoid; margin-bottom:16px; border-radius:8px; overflow:hidden; border:1px solid #b41e1e22; cursor:pointer; transition:all .3s; position:relative; }
-    .gallery-item:hover { border-color:#b41e1e88; transform:scale(1.02); box-shadow:0 0 24px #b41e1e44; }
-    .gallery-item img { width:100%; display:block; }
-    .gallery-item .overlay { position:absolute; bottom:0;left:0;right:0; background:linear-gradient(transparent,#0a0a0fcc); padding:16px; opacity:0; transition:opacity .3s; font-size:.75rem; color:#b41e1e; letter-spacing:.1em; }
-    .gallery-item:hover .overlay { opacity:1; }
+    .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:16px; }
+    @media(max-width:600px) { .gallery-grid { grid-template-columns:1fr 1fr; gap:10px; } }
+    @media(max-width:380px) { .gallery-grid { grid-template-columns:1fr; } }
 
-    .lightbox { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:#000000dd; z-index:999; align-items:center; justify-content:center; }
+    .gallery-item { border-radius:8px; overflow:hidden; border:1px solid #b41e1e22; position:relative; }
+    .gallery-item img { width:100%; display:block; aspect-ratio:1; object-fit:cover; }
+    .gallery-item .overlay { position:absolute; bottom:0;left:0;right:0; background:linear-gradient(transparent,#0a0a0fcc); padding:12px; font-size:.7rem; color:#b41e1e; }
+
+    .gallery-item .comment-toggle { display:block; width:100%; padding:12px; background:#0f0f18; border:none; border-top:1px solid #b41e1e22; color:#b41e1e; font-family:inherit; font-size:.8rem; min-height:44px; cursor:pointer; text-align:center; }
+    .gallery-item .comment-toggle:active { background:#b41e1e11; }
+
+    .comments-section { display:none; background:#0f0f18; border-top:1px solid #b41e1e22; padding:12px; max-height:300px; overflow-y:auto; }
+    .comments-section.open { display:block; }
+    .comment { margin-bottom:10px; padding:8px; background:#0a0a0f; border-radius:4px; border:1px solid #b41e1e11; }
+    .comment .name { color:#b41e1e; font-size:.7rem; font-weight:bold; margin-bottom:4px; }
+    .comment .text { color:#ccc; font-size:.78rem; line-height:1.4; word-wrap:break-word; }
+    .comment .time { color:#444; font-size:.65rem; margin-top:4px; }
+    .no-comments { color:#444; font-size:.75rem; font-style:italic; }
+
+    .comment-form { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+    .comment-form input, .comment-form textarea { background:#0a0a0f; border:1px solid #b41e1e33; border-radius:4px; color:#fff; padding:10px; font-family:inherit; font-size:.85rem; min-height:44px; }
+    .comment-form textarea { resize:vertical; min-height:60px; }
+    .comment-form input:focus, .comment-form textarea:focus { border-color:#b41e1e; outline:none; }
+    .comment-form button { background:#b41e1e; color:#fff; border:none; padding:12px; border-radius:4px; font-family:inherit; font-size:.85rem; font-weight:bold; min-height:48px; cursor:pointer; }
+    .comment-form button:active { background:#d42020; }
+
+    .lightbox { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:#000000ee; z-index:999; align-items:center; justify-content:center; }
     .lightbox.open { display:flex; }
-    .lightbox img { max-width:90vw; max-height:90vh; border-radius:8px; border:1px solid #b41e1e44; box-shadow:0 0 60px #b41e1e44; }
-    .lightbox-close { position:absolute; top:24px; right:32px; font-size:2rem; color:#b41e1e; cursor:pointer; }
-    .lightbox-close:hover { color:#fff; }
+    .lightbox img { max-width:95vw; max-height:90vh; border-radius:8px; }
+    .lightbox-close { position:absolute; top:16px; right:20px; font-size:2.5rem; color:#b41e1e; cursor:pointer; min-width:48px; min-height:48px; text-align:center; line-height:48px; }
 
-    footer { text-align:center; font-size:.7rem; color:#333; letter-spacing:.2em; margin-top:48px; padding-top:20px; border-top:1px solid #b41e1e22; }
+    footer { text-align:center; font-size:.65rem; color:#333; margin-top:36px; padding-top:16px; border-top:1px solid #b41e1e22; }
   </style>
 </head>
 <body>
@@ -54,32 +64,55 @@
   <header>
     <div>
       <h1>GALLERY</h1>
-      <div class="subtitle">NATHAN VASU — PERSONAL</div>
+      <div class="subtitle">NATHAN VASU</div>
     </div>
-    <a href="/" class="nav-back">← BACK TO STATUS</a>
+    <a href="/" class="nav-back">← BACK</a>
   </header>
 
   <div class="upload-zone" id="upload-zone">
     <input type="file" id="file-input" accept="image/*" multiple onchange="handleFiles(this.files)"/>
     <div class="icon">📸</div>
-    <p>Drop photos here or <span>click to browse</span></p>
-    <p style="margin-top:6px;font-size:.7rem">Anyone can upload — JPG, PNG, GIF, WEBP</p>
-    <button class="upload-btn" id="upload-btn" onclick="uploadFiles(event)">UPLOAD TO SITE</button>
+    <p>Tap to upload or <span>browse</span></p>
+    <button class="upload-btn" id="upload-btn" onclick="uploadFiles(event)">UPLOAD</button>
     <div class="upload-status" id="upload-status"></div>
   </div>
 
   <div class="gallery-grid" id="gallery-grid">
-    <div class="gallery-item" onclick="openLightbox('photos/photo1.jpg')">
-      <img src="photos/photo1.jpg" alt="Photo 1" loading="lazy"/>
-      <div class="overlay">PHOTO 01</div>
+    <div class="gallery-item" data-photo="photo1">
+      <img src="photos/photo1.jpg" alt="Photo 1" loading="lazy" onclick="openLightbox('photos/photo1.jpg')"/>
+      <button class="comment-toggle" onclick="toggleComments('photo1')">💬 Comments</button>
+      <div class="comments-section" id="comments-photo1">
+        <div id="comments-list-photo1"><div class="no-comments">No comments yet</div></div>
+        <div class="comment-form">
+          <input type="text" placeholder="Your name" id="name-photo1"/>
+          <textarea placeholder="Write a comment..." id="text-photo1"></textarea>
+          <button onclick="postComment('photo1')">POST</button>
+        </div>
+      </div>
     </div>
-    <div class="gallery-item" onclick="openLightbox('photos/photo2.png')">
-      <img src="photos/photo2.png" alt="Photo 2" loading="lazy"/>
-      <div class="overlay">PHOTO 02</div>
+    <div class="gallery-item" data-photo="photo2">
+      <img src="photos/photo2.png" alt="Photo 2" loading="lazy" onclick="openLightbox('photos/photo2.png')"/>
+      <button class="comment-toggle" onclick="toggleComments('photo2')">💬 Comments</button>
+      <div class="comments-section" id="comments-photo2">
+        <div id="comments-list-photo2"><div class="no-comments">No comments yet</div></div>
+        <div class="comment-form">
+          <input type="text" placeholder="Your name" id="name-photo2"/>
+          <textarea placeholder="Write a comment..." id="text-photo2"></textarea>
+          <button onclick="postComment('photo2')">POST</button>
+        </div>
+      </div>
     </div>
-    <div class="gallery-item" onclick="openLightbox('photos/photo3.png')">
-      <img src="photos/photo3.png" alt="Photo 3" loading="lazy"/>
-      <div class="overlay">PHOTO 03</div>
+    <div class="gallery-item" data-photo="photo3">
+      <img src="photos/photo3.png" alt="Photo 3" loading="lazy" onclick="openLightbox('photos/photo3.png')"/>
+      <button class="comment-toggle" onclick="toggleComments('photo3')">💬 Comments</button>
+      <div class="comments-section" id="comments-photo3">
+        <div id="comments-list-photo3"><div class="no-comments">No comments yet</div></div>
+        <div class="comment-form">
+          <input type="text" placeholder="Your name" id="name-photo3"/>
+          <textarea placeholder="Write a comment..." id="text-photo3"></textarea>
+          <button onclick="postComment('photo3')">POST</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -90,69 +123,94 @@
 </div>
 
 <script>
-  const API = 'https://sagem-county-favourites-devon.trycloudflare.com';
+  const API = 'https://tried-cruise-holding-submitting.trycloudflare.com';
   let pendingFiles = [];
 
-  const zone = document.getElementById('upload-zone');
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag'); handleFiles(e.dataTransfer.files); });
+  // Comments stored in localStorage (persists per browser)
+  function getComments(photo) {
+    try { return JSON.parse(localStorage.getItem('comments_'+photo)) || []; } catch(e) { return []; }
+  }
+  function saveComment(photo, name, text) {
+    const c = getComments(photo);
+    c.push({ name, text, time: new Date().toLocaleString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'}) });
+    localStorage.setItem('comments_'+photo, JSON.stringify(c));
+  }
 
+  function renderComments(photo) {
+    const list = document.getElementById('comments-list-'+photo);
+    const comments = getComments(photo);
+    if(!comments.length) { list.innerHTML = '<div class="no-comments">No comments yet</div>'; return; }
+    list.innerHTML = comments.map(c =>
+      `<div class="comment"><div class="name">${esc(c.name)}</div><div class="text">${esc(c.text)}</div><div class="time">${esc(c.time)}</div></div>`
+    ).join('');
+    list.scrollTop = list.scrollHeight;
+  }
+
+  function postComment(photo) {
+    const name = document.getElementById('name-'+photo).value.trim();
+    const text = document.getElementById('text-'+photo).value.trim();
+    if(!name || !text) return;
+    saveComment(photo, name, text);
+    renderComments(photo);
+    document.getElementById('text-'+photo).value = '';
+    // Also try to save to server
+    fetch(API+'/comment', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({photo, name, text}) }).catch(()=>{});
+  }
+
+  function toggleComments(photo) {
+    const el = document.getElementById('comments-'+photo);
+    el.classList.toggle('open');
+    if(el.classList.contains('open')) renderComments(photo);
+  }
+
+  function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  // Load comments on page load
+  ['photo1','photo2','photo3'].forEach(renderComments);
+
+  // Upload
   function handleFiles(files) {
     pendingFiles = Array.from(files);
-    if (pendingFiles.length > 0) {
+    if(pendingFiles.length) {
       document.getElementById('upload-btn').style.display = 'inline-block';
-      document.getElementById('upload-status').textContent = `${pendingFiles.length} file(s) selected`;
+      document.getElementById('upload-status').textContent = pendingFiles.length+' file(s) selected';
       document.getElementById('upload-status').className = 'upload-status';
     }
   }
-
   async function uploadFiles(e) {
     e.stopPropagation();
-    if (!pendingFiles.length) return;
+    if(!pendingFiles.length) return;
     const btn = document.getElementById('upload-btn');
     const status = document.getElementById('upload-status');
     btn.disabled = true;
-    for (let i = 0; i < pendingFiles.length; i++) {
-      const file = pendingFiles[i];
+    for(let i=0; i<pendingFiles.length; i++) {
       status.className = 'upload-status loading';
-      status.textContent = `Uploading ${file.name} (${i+1}/${pendingFiles.length})...`;
-      const base64 = await toBase64(file);
+      status.textContent = 'Uploading '+(i+1)+'/'+pendingFiles.length+'...';
+      const base64 = await toBase64(pendingFiles[i]);
       try {
-        const r = await fetch(API + '/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, data: base64 })
-        });
+        const r = await fetch(API+'/upload', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({filename:pendingFiles[i].name, data:base64}) });
         const d = await r.json();
-        if (!d.ok) throw new Error(d.error);
+        if(!d.ok) throw new Error(d.error);
       } catch(err) {
         status.className = 'upload-status err';
-        status.textContent = `✗ Error: ${err.message}`;
+        status.textContent = '✗ '+err.message;
         btn.disabled = false;
         return;
       }
     }
     status.className = 'upload-status ok';
-    status.textContent = `✓ Uploaded! Refreshing in 3s...`;
-    setTimeout(() => location.reload(), 3000);
+    status.textContent = '✓ Done! Refreshing...';
+    setTimeout(()=>location.reload(), 2000);
   }
+  function toBase64(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); }); }
 
-  function toBase64(file) {
-    return new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => res(reader.result);
-      reader.onerror = rej;
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function openLightbox(src) {
-    document.getElementById('lightbox-img').src = src;
-    document.getElementById('lightbox').classList.add('open');
-  }
+  // Lightbox
+  function openLightbox(src) { document.getElementById('lightbox-img').src=src; document.getElementById('lightbox').classList.add('open'); }
   function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
-  document.addEventListener('keydown', e => { if(e.key==='Escape') closeLightbox(); });
 </script>
+
+<footer>ULTRON v1.0 — kogyjut.github.io</footer>
 </body>
 </html>
