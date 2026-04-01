@@ -106,8 +106,21 @@
       </div>
     </div>
 
+    <div class="gallery-item" data-photo="SDwrY.jpg">
+      <img src="photos/SDwrY.jpg" alt="Photo 3" loading="lazy" onclick="openLightbox('photos/SDwrY.jpg')"/>
+      <button class="comment-toggle" onclick="toggleComments('SDwrY.jpg')">💬 Comments</button>
+      <div class="comments-section" id="comments-SDwrY.jpg">
+        <div id="comments-list-SDwrY.jpg"><div class="no-comments">No comments yet</div></div>
+        <div class="comment-form">
+          <input type="text" placeholder="Your name" id="name-SDwrY.jpg"/>
+          <textarea placeholder="Write a comment..." id="text-SDwrY.jpg"></textarea>
+          <button onclick="postComment('SDwrY.jpg')">POST</button>
+        </div>
+      </div>
+    </div>
+
     <div class="gallery-item" data-photo="photo1.jpg">
-      <img src="photos/photo1.jpg" alt="Photo 3" loading="lazy" onclick="openLightbox('photos/photo1.jpg')"/>
+      <img src="photos/photo1.jpg" alt="Photo 4" loading="lazy" onclick="openLightbox('photos/photo1.jpg')"/>
       <button class="comment-toggle" onclick="toggleComments('photo1.jpg')">💬 Comments</button>
       <div class="comments-section" id="comments-photo1.jpg">
         <div id="comments-list-photo1.jpg"><div class="no-comments">No comments yet</div></div>
@@ -120,7 +133,7 @@
     </div>
 
     <div class="gallery-item" data-photo="photo2.png">
-      <img src="photos/photo2.png" alt="Photo 4" loading="lazy" onclick="openLightbox('photos/photo2.png')"/>
+      <img src="photos/photo2.png" alt="Photo 5" loading="lazy" onclick="openLightbox('photos/photo2.png')"/>
       <button class="comment-toggle" onclick="toggleComments('photo2.png')">💬 Comments</button>
       <div class="comments-section" id="comments-photo2.png">
         <div id="comments-list-photo2.png"><div class="no-comments">No comments yet</div></div>
@@ -133,7 +146,7 @@
     </div>
 
     <div class="gallery-item" data-photo="photo3.png">
-      <img src="photos/photo3.png" alt="Photo 5" loading="lazy" onclick="openLightbox('photos/photo3.png')"/>
+      <img src="photos/photo3.png" alt="Photo 6" loading="lazy" onclick="openLightbox('photos/photo3.png')"/>
       <button class="comment-toggle" onclick="toggleComments('photo3.png')">💬 Comments</button>
       <div class="comments-section" id="comments-photo3.png">
         <div id="comments-list-photo3.png"><div class="no-comments">No comments yet</div></div>
@@ -197,7 +210,7 @@
   function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
   // Load comments on page load
-  ['IMG_5803.jpeg','IMG_7582.jpeg','photo1.jpg','photo2.png','photo3.png'].forEach(renderComments);
+  ['IMG_5803.jpeg','IMG_7582.jpeg','SDwrY.jpg','photo1.jpg','photo2.png','photo3.png'].forEach(renderComments);
 
   // Upload
   function handleFiles(files) {
