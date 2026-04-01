@@ -226,26 +226,36 @@
     if(!pendingFiles.length) return;
     const btn = document.getElementById('upload-btn');
     const status = document.getElementById('upload-status');
+    const grid = document.getElementById('gallery-grid');
     btn.disabled = true;
     for(let i=0; i<pendingFiles.length; i++) {
+      const file = pendingFiles[i];
       status.className = 'upload-status loading';
       status.textContent = 'Uploading '+(i+1)+'/'+pendingFiles.length+'...';
-      const base64 = await toBase64(pendingFiles[i]);
+      // Instant preview
+      const localUrl = URL.createObjectURL(file);
+      const item = document.createElement('div');
+      item.className = 'gallery-item';
+      item.innerHTML = '<img src="'+localUrl+'" alt="'+file.name+'" style="opacity:0.6" loading="lazy" onclick="openLightbox(\''+localUrl+'\')"/><div style="text-align:center;padding:10px;color:#b41e1e;font-size:.75rem">⏳ Uploading...</div>';
+      grid.insertBefore(item, grid.firstChild);
+      const base64 = await toBase64(file);
       try {
         const r = await fetch(API+'/upload', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({filename:pendingFiles[i].name, data:base64}) });
+          body: JSON.stringify({filename:file.name, data:base64}), signal: AbortSignal.timeout(30000) });
         const d = await r.json();
         if(!d.ok) throw new Error(d.error);
+        item.querySelector('img').style.opacity = '1';
+        item.lastChild.textContent = '✓ Uploaded';
+        item.lastChild.style.color = '#4ade80';
       } catch(err) {
-        status.className = 'upload-status err';
-        status.textContent = '✗ '+err.message;
-        btn.disabled = false;
-        return;
+        item.lastChild.textContent = '✗ '+err.message;
+        item.lastChild.style.color = '#f87171';
       }
     }
     status.className = 'upload-status ok';
-    status.textContent = '✓ Done! Refreshing...';
-    setTimeout(()=>location.reload(), 2000);
+    status.textContent = '✓ All done!';
+    btn.style.display = 'none';
+    pendingFiles = [];
   }
   function toBase64(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); }); }
 
