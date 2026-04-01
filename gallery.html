@@ -169,14 +169,29 @@
   const API = 'https://headquarters-cameron-within-machine.trycloudflare.com';
   let pendingFiles = [];
 
-  // Comments stored in localStorage (persists per browser)
+  // Shared comments via server + localStorage fallback
+  let serverComments = {};
+  async function loadServerComments() {
+    try {
+      const r = await fetch(API+'/comments', {signal: AbortSignal.timeout(5000)});
+      serverComments = await r.json();
+    } catch(e) { serverComments = {}; }
+  }
   function getComments(photo) {
-    try { return JSON.parse(localStorage.getItem('comments_'+photo)) || []; } catch(e) { return []; }
+    const server = (serverComments[photo] || []).map(c => ({...c, time: c.time ? new Date(c.time).toLocaleString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'}) : ''}));
+    const local = (() => { try { return JSON.parse(localStorage.getItem('comments_'+photo)) || []; } catch(e) { return []; } })();
+    // Merge: server takes priority, add any local-only ones
+    if(server.length) return server;
+    return local;
   }
   function saveComment(photo, name, text) {
-    const c = getComments(photo);
-    c.push({ name, text, time: new Date().toLocaleString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'}) });
+    const c = (() => { try { return JSON.parse(localStorage.getItem('comments_'+photo)) || []; } catch(e) { return []; } })();
+    const entry = { name, text, time: new Date().toLocaleString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'}) };
+    c.push(entry);
     localStorage.setItem('comments_'+photo, JSON.stringify(c));
+    // Also add to serverComments so it shows immediately
+    if(!serverComments[photo]) serverComments[photo] = [];
+    serverComments[photo].push({name, text, time: new Date().toISOString()});
   }
 
   function renderComments(photo) {
@@ -209,8 +224,13 @@
 
   function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-  // Load comments on page load
-  ['IMG_5803.jpeg','IMG_7582.jpeg','SDwrY.jpg','photo1.jpg','photo2.png','photo3.png'].forEach(renderComments);
+  // Load shared comments then render
+  loadServerComments().then(() => {
+    document.querySelectorAll('.gallery-item').forEach(item => {
+      const photo = item.dataset.photo;
+      if(photo) renderComments(photo);
+    });
+  });
 
   // Upload
   function handleFiles(files) {
