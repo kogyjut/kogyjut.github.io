@@ -3,52 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>TETRIS FOR PUFFS 💨</title>
+  <title>TETRIS FOR PUFFS</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-    html,body { background:#0a0a0f; color:#fff; font-family:'Courier New',monospace; height:100%; overflow:hidden; touch-action:none; }
-    
-    .header { text-align:center; padding:8px 0 4px; }
-    .header h1 { font-size:1.2rem; letter-spacing:.12em; text-shadow:0 0 15px #b41e1e; }
-    .header h1 span { color:#b41e1e; }
-    
-    .stats { display:flex; justify-content:center; gap:16px; padding:4px 0 8px; }
-    .stat { text-align:center; }
-    .stat-label { font-size:.55rem; color:#b41e1e; letter-spacing:.15em; }
-    .stat-value { font-size:1.1rem; font-weight:bold; }
-    
-    .game-wrap { display:flex; justify-content:center; position:relative; }
-    canvas { border:2px solid #b41e1e44; border-radius:4px; background:#0f0f18; display:block; }
-    
-    .controls { display:flex; justify-content:center; align-items:center; gap:12px; padding:10px 0; }
-    .ctrl-btn { background:#1a1a2e; border:2px solid #b41e1e55; border-radius:12px; color:#fff; font-size:1.8rem; width:70px; height:70px; display:flex; align-items:center; justify-content:center; user-select:none; }
-    .ctrl-btn:active { background:#b41e1e44; border-color:#b41e1e; }
-    
-    .roast { color:#b41e1e; font-size:.7rem; text-align:center; padding:4px; font-style:italic; min-height:18px; }
-    
-    .overlay { position:absolute; top:0;left:0;right:0;bottom:0; background:#0a0a0fee; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:4px; z-index:10; }
-    .overlay.hidden { display:none; }
-    .overlay h2 { font-size:1.4rem; color:#b41e1e; margin-bottom:6px; letter-spacing:.12em; }
-    .overlay p { color:#888; font-size:.75rem; margin-bottom:12px; text-align:center; padding:0 20px; }
-    .play-btn { background:#b41e1e; color:#fff; border:none; padding:18px 48px; border-radius:10px; font-family:inherit; font-size:1.1rem; font-weight:bold; letter-spacing:.12em; }
-    .play-btn:active { background:#d42020; }
-    
-    .nav-back { color:#b41e1e; text-decoration:none; font-size:.75rem; padding:8px 12px; position:absolute; top:4px; left:8px; z-index:20; }
+    *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{background:#0a0a0f;color:#fff;font-family:'Courier New',monospace;height:100%;overflow:hidden;touch-action:none;position:fixed;width:100%}
+    .header{text-align:center;padding:6px 0 2px}
+    .header h1{font-size:1.1rem;letter-spacing:.1em;text-shadow:0 0 15px #b41e1e}
+    .header h1 span{color:#b41e1e}
+    .stats{display:flex;justify-content:center;gap:20px;padding:2px 0 6px}
+    .stat-label{font-size:.5rem;color:#b41e1e;letter-spacing:.1em}
+    .stat-value{font-size:1rem;font-weight:bold}
+    .game-wrap{display:flex;justify-content:center}
+    canvas{border:2px solid #b41e1e44;border-radius:4px;background:#0f0f18;display:block}
+    .roast{color:#b41e1e;font-size:.65rem;text-align:center;padding:4px;font-style:italic;height:18px}
+    .controls{display:flex;justify-content:center;gap:10px;padding:8px 12px}
+    .ctrl-btn{background:#1a1a2e;border:2px solid #b41e1e55;border-radius:14px;color:#fff;font-size:2rem;flex:1;max-width:80px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;user-select:none}
+    .ctrl-btn:active{background:#b41e1e44;border-color:#b41e1e}
+    .overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:#0a0a0fee;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;z-index:10}
+    .overlay.hidden{display:none}
+    .overlay h2{font-size:1.3rem;color:#b41e1e;margin-bottom:6px;letter-spacing:.1em}
+    .overlay p{color:#888;font-size:.7rem;margin-bottom:10px;text-align:center;padding:0 16px}
+    .play-btn{background:#b41e1e;color:#fff;border:none;padding:18px 52px;border-radius:12px;font-family:inherit;font-size:1.1rem;font-weight:bold;letter-spacing:.1em}
+    .play-btn:active{background:#d42020}
+    .nav-back{color:#b41e1e;text-decoration:none;font-size:.7rem;padding:6px 10px;position:absolute;top:2px;left:6px;z-index:20}
   </style>
 </head>
 <body>
-
 <a href="/" class="nav-back">← BACK</a>
 <div class="header"><h1>TETRIS FOR <span>PUFFS</span> 💨</h1></div>
-
 <div class="stats">
   <div class="stat"><div class="stat-label">SCORE</div><div class="stat-value" id="score">0</div></div>
   <div class="stat"><div class="stat-label">LINES</div><div class="stat-value" id="lines">0</div></div>
   <div class="stat"><div class="stat-label">LEVEL</div><div class="stat-value" id="level">1</div></div>
 </div>
-
 <div class="game-wrap">
-  <div style="position:relative">
+  <div style="position:relative" id="board-wrap">
     <canvas id="board"></canvas>
     <div class="overlay" id="start-overlay">
       <h2>TETRIS FOR PUFFS</h2>
@@ -63,127 +52,106 @@
     </div>
   </div>
 </div>
-
 <div class="roast" id="roast"></div>
-
 <div class="controls">
   <div class="ctrl-btn" id="btn-left">←</div>
+  <div class="ctrl-btn" id="btn-down">↓</div>
   <div class="ctrl-btn" id="btn-rotate">↻</div>
-  <div class="ctrl-btn" id="btn-drop">⬇</div>
+  <div class="ctrl-btn" id="btn-drop">⏬</div>
   <div class="ctrl-btn" id="btn-right">→</div>
 </div>
-
 <script>
-const COLS = 7, ROWS = 12;
-const canvas = document.getElementById('board');
-const ctx = canvas.getContext('2d');
+var COLS=6,ROWS=12;
+var canvas=document.getElementById('board');
+var ctx=canvas.getContext('2d');
+var usableH=window.innerHeight-200;
+var usableW=window.innerWidth-20;
+var SZ=Math.min(Math.floor(usableW/COLS),Math.floor(usableH/ROWS));
+canvas.width=COLS*SZ;
+canvas.height=ROWS*SZ;
 
-// Calculate block size to fill screen width
-const maxW = Math.min(window.innerWidth - 16, 400);
-const SZ = Math.floor(maxW / COLS);
-canvas.width = COLS * SZ;
-canvas.height = ROWS * SZ;
+var faceImg=new Image();
+faceImg.src='game/face1.png';
 
-const FACES = ['game/face1.png','game/face2.png','game/face3.png','game/face4.png','game/face5.png','game/face6.png'];
-const faceImgs = FACES.map(src => { const img = new Image(); img.src = src; return img; });
+var ROASTS=["That's embarrassing 💀","Even your nan plays better","Certified puff moment","L + ratio + skill issue","Bro thinks he's good 😂","You dropped this: 🤡","Peak puff performance","Are you even trying lmao","POV: you have no thumbs"];
+var LROASTS=["","1 line? Cute","Not bad puff","Oi go off","SHEESH 🔥"];
+var SHAPES=[[[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]],[[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]]];
 
-const ROASTS = [
-  "That's embarrassing 💀","Even your nan plays better","Certified puff moment",
-  "L + ratio + skill issue","Bro thinks he's good 😂","My grandma called, wants her reflexes back",
-  "You dropped this: 🤡","Peak puff performance","Are you even trying lmao",
-  "POV: you have no thumbs","This is why it's called Tetris for PUFFS"
-];
-const LINE_ROASTS = ["","1 line? Cute","Not bad puff","Oi go off","SHEESH 🔥"];
+var board,current,score,lines,level,gameOver,timer,interval;
 
-const SHAPES = [
-  [[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[1,0,0],[1,1,1]],
-  [[0,0,1],[1,1,1]],[[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]]
-];
+function init(){board=[];for(var i=0;i<ROWS;i++){var row=[];for(var j=0;j<COLS;j++)row.push(0);board.push(row);}score=0;lines=0;level=1;gameOver=false;interval=600;ui();}
+function rp(){var s=SHAPES[Math.floor(Math.random()*SHAPES.length)];return{shape:s,x:Math.floor(COLS/2)-Math.floor(s[0].length/2),y:0};}
+function startGame(){document.getElementById('start-overlay').classList.add('hidden');document.getElementById('gameover-overlay').classList.add('hidden');init();current=rp();clearInterval(timer);timer=setInterval(tick,interval);draw();}
 
-let board, current, score, lines, level, gameOver, dropTimer, dropInterval, faceMap;
+function ok(p,dx,dy,s){s=s||p.shape;for(var r=0;r<s.length;r++)for(var c=0;c<s[r].length;c++)if(s[r][c]){var nx=p.x+c+dx,ny=p.y+r+dy;if(nx<0||nx>=COLS||ny>=ROWS)return false;if(ny>=0&&board[ny][nx])return false;}return true;}
 
-function init() {
-  board = Array.from({length:ROWS}, () => Array(COLS).fill(0));
-  faceMap = Array.from({length:ROWS}, () => Array(COLS).fill(-1));
-  score=0; lines=0; level=1; gameOver=false; dropInterval=700;
-  updateUI();
+function lock(){
+  var r,c;
+  for(r=0;r<current.shape.length;r++)for(c=0;c<current.shape[r].length;c++)if(current.shape[r][c]){var ny=current.y+r;if(ny<0){endG();return;}board[ny][current.x+c]=1;}
+  var cl=0;for(r=ROWS-1;r>=0;r--)if(board[r].every(function(v){return v;})){board.splice(r,1);var nr=[];for(c=0;c<COLS;c++)nr.push(0);board.unshift(nr);cl++;r++;}
+  if(cl){lines+=cl;score+=[0,100,300,500,800][cl]*level;level=Math.floor(lines/10)+1;interval=Math.max(80,600-((level-1)*50));clearInterval(timer);timer=setInterval(tick,interval);ui();document.getElementById('roast').textContent=LROASTS[Math.min(cl,4)]||'';}
+  current=rp();if(!ok(current,0,0))endG();
+}
+function endG(){gameOver=true;clearInterval(timer);document.getElementById('final-score').textContent='Score: '+score+' | Lines: '+lines;document.getElementById('gameover-roast').textContent=ROASTS[Math.floor(Math.random()*ROASTS.length)];document.getElementById('gameover-overlay').classList.remove('hidden');}
+function tick(){if(gameOver)return;if(ok(current,0,1))current.y++;else lock();draw();}
+function ml(){if(!gameOver&&ok(current,-1,0)){current.x--;draw();}}
+function mr(){if(!gameOver&&ok(current,1,0)){current.x++;draw();}}
+function rot(){if(gameOver)return;var s=current.shape;var rotated=s[0].map(function(_,i){return s.map(function(row){return row[i];}).reverse();});if(ok(current,0,0,rotated)){current.shape=rotated;draw();}}
+function sd(){if(!gameOver&&ok(current,0,1)){current.y++;score++;draw();ui();}}
+function hd(){if(gameOver)return;while(ok(current,0,1)){current.y++;score+=2;}lock();draw();ui();}
+
+function draw(){
+  ctx.fillStyle='#0f0f18';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle='#1a1a2e';ctx.lineWidth=0.5;
+  var r,c;
+  for(r=0;r<=ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*SZ);ctx.lineTo(COLS*SZ,r*SZ);ctx.stroke();}
+  for(c=0;c<=COLS;c++){ctx.beginPath();ctx.moveTo(c*SZ,0);ctx.lineTo(c*SZ,ROWS*SZ);ctx.stroke();}
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++)if(board[r][c])db(c*SZ,r*SZ);
+  var gy=current.y;while(ok({shape:current.shape,x:current.x,y:gy},0,1))gy++;
+  ctx.globalAlpha=0.15;for(r=0;r<current.shape.length;r++)for(c=0;c<current.shape[r].length;c++)if(current.shape[r][c])db((current.x+c)*SZ,(gy+r)*SZ);ctx.globalAlpha=1;
+  for(r=0;r<current.shape.length;r++)for(c=0;c<current.shape[r].length;c++)if(current.shape[r][c])db((current.x+c)*SZ,(current.y+r)*SZ);
 }
 
-function rp() {
-  const shape = SHAPES[Math.floor(Math.random()*SHAPES.length)];
-  return { shape, face:Math.floor(Math.random()*6), x:Math.floor(COLS/2)-Math.floor(shape[0].length/2), y:0 };
+function db(x,y){
+  if(faceImg.complete&&faceImg.naturalWidth)ctx.drawImage(faceImg,x+1,y+1,SZ-2,SZ-2);
+  else{ctx.fillStyle='#b41e1e';ctx.fillRect(x+1,y+1,SZ-2,SZ-2);}
+  ctx.strokeStyle='#b41e1e22';ctx.lineWidth=1;ctx.strokeRect(x,y,SZ,SZ);
 }
 
-function startGame() {
-  document.getElementById('start-overlay').classList.add('hidden');
-  document.getElementById('gameover-overlay').classList.add('hidden');
-  init(); current = rp();
-  clearInterval(dropTimer); dropTimer = setInterval(tick, dropInterval);
+function ui(){document.getElementById('score').textContent=score;document.getElementById('lines').textContent=lines;document.getElementById('level').textContent=level;}
+
+// Touch controls with repeat
+var repeatId=null;
+function bind(id,fn,rep){
+  var el=document.getElementById(id);
+  el.addEventListener('touchstart',function(ev){ev.preventDefault();fn();if(rep){clearInterval(repeatId);repeatId=setInterval(fn,120);}},{passive:false});
+  el.addEventListener('touchend',function(ev){ev.preventDefault();clearInterval(repeatId);},{passive:false});
+  el.addEventListener('touchcancel',function(){clearInterval(repeatId);});
+  el.addEventListener('click',function(ev){ev.preventDefault();fn();});
+}
+bind('btn-left',ml,true);
+bind('btn-right',mr,true);
+bind('btn-down',sd,true);
+bind('btn-rotate',rot,false);
+bind('btn-drop',hd,false);
+
+// Swipe on canvas
+var tx=0,ty=0;
+canvas.addEventListener('touchstart',function(ev){ev.preventDefault();tx=ev.touches[0].clientX;ty=ev.touches[0].clientY;},{passive:false});
+canvas.addEventListener('touchend',function(ev){ev.preventDefault();var dx=ev.changedTouches[0].clientX-tx,dy=ev.changedTouches[0].clientY-ty;
+  if(Math.abs(dx)<15&&Math.abs(dy)<15){rot();return;}
+  if(Math.abs(dx)>Math.abs(dy)){if(dx>30)mr();else if(dx<-30)ml();}
+  else{if(dy>40)hd();}
   draw();
-}
+},{passive:false});
 
-function ok(p,dx,dy,s) {
-  s=s||p.shape;
-  for(let r=0;r<s.length;r++) for(let c=0;c<s[r].length;c++) if(s[r][c]) {
-    const nx=p.x+c+dx, ny=p.y+r+dy;
-    if(nx<0||nx>=COLS||ny>=ROWS) return false;
-    if(ny>=0&&board[ny][nx]) return false;
-  }
-  return true;
-}
-
-function lock() {
-  for(let r=0;r<current.shape.length;r++) for(let c=0;c<current.shape[r].length;c++)
-    if(current.shape[r][c]) { const ny=current.y+r; if(ny<0){endGame();return;} board[ny][current.x+c]=1; faceMap[ny][current.x+c]=current.face; }
-  let cl=0;
-  for(let r=ROWS-1;r>=0;r--) if(board[r].every(v=>v)) { board.splice(r,1); board.unshift(Array(COLS).fill(0)); faceMap.splice(r,1); faceMap.unshift(Array(COLS).fill(-1)); cl++; r++; }
-  if(cl) { lines+=cl; score+=[0,100,300,500,800][cl]*level; level=Math.floor(lines/10)+1; dropInterval=Math.max(100,700-((level-1)*60)); clearInterval(dropTimer); dropTimer=setInterval(tick,dropInterval); updateUI(); document.getElementById('roast').textContent=LINE_ROASTS[Math.min(cl,4)]||''; }
-  current=rp(); if(!ok(current,0,0)) endGame();
-}
-
-function endGame() { gameOver=true; clearInterval(dropTimer); document.getElementById('final-score').textContent='Score: '+score+' | Lines: '+lines; document.getElementById('gameover-roast').textContent=ROASTS[Math.floor(Math.random()*ROASTS.length)]; document.getElementById('gameover-overlay').classList.remove('hidden'); }
-
-function tick() { if(gameOver)return; if(ok(current,0,1))current.y++; else lock(); draw(); }
-function moveL() { if(!gameOver&&ok(current,-1,0)){current.x--;draw();} }
-function moveR() { if(!gameOver&&ok(current,1,0)){current.x++;draw();} }
-function rot() { if(gameOver)return; const s=current.shape; const r=s[0].map((_,i)=>s.map(row=>row[i]).reverse()); if(ok(current,0,0,r)){current.shape=r;draw();} }
-function drop() { if(gameOver)return; while(ok(current,0,1)){current.y++;score+=2;} lock();draw();updateUI(); }
-
-function draw() {
-  ctx.fillStyle='#0f0f18'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=0.5;
-  for(let r=0;r<ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*SZ);ctx.lineTo(COLS*SZ,r*SZ);ctx.stroke();}
-  for(let c=0;c<COLS;c++){ctx.beginPath();ctx.moveTo(c*SZ,0);ctx.lineTo(c*SZ,ROWS*SZ);ctx.stroke();}
-  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) if(board[r][c]) db(c*SZ,r*SZ,faceMap[r][c]);
-  // Ghost
-  let gy=current.y; while(ok({...current,y:gy},0,1))gy++;
-  ctx.globalAlpha=0.2; for(let r=0;r<current.shape.length;r++) for(let c=0;c<current.shape[r].length;c++) if(current.shape[r][c]) db((current.x+c)*SZ,(gy+r)*SZ,current.face); ctx.globalAlpha=1;
-  for(let r=0;r<current.shape.length;r++) for(let c=0;c<current.shape[r].length;c++) if(current.shape[r][c]) db((current.x+c)*SZ,(current.y+r)*SZ,current.face);
-}
-
-function db(x,y,f) {
-  const img=faceImgs[f];
-  if(img&&img.complete&&img.naturalWidth) ctx.drawImage(img,x+1,y+1,SZ-2,SZ-2);
-  else { ctx.fillStyle=['#b41e1e','#1e7eb4','#1eb44e','#b4a01e','#8e1eb4','#b4651e'][f]; ctx.fillRect(x+1,y+1,SZ-2,SZ-2); }
-  ctx.strokeStyle='#b41e1e33'; ctx.lineWidth=1; ctx.strokeRect(x+1,y+1,SZ-2,SZ-2);
-}
-
-function updateUI() { document.getElementById('score').textContent=score; document.getElementById('lines').textContent=lines; document.getElementById('level').textContent=level; }
-
-// Touch controls
-['btn-left','btn-rotate','btn-drop','btn-right'].forEach((id,i)=>{
-  const el=document.getElementById(id);
-  const fn=[moveL,rot,drop,moveR][i];
-  el.addEventListener('touchstart',e=>{e.preventDefault();fn();},{passive:false});
-  el.addEventListener('click',fn);
-});
-document.body.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+document.body.addEventListener('touchmove',function(ev){ev.preventDefault();},{passive:false});
 
 // Keyboard
-document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowLeft')moveL(); else if(e.key==='ArrowRight')moveR();
-  else if(e.key==='ArrowUp')rot(); else if(e.key==='ArrowDown')tick();
-  else if(e.key===' '){e.preventDefault();drop();}
+document.addEventListener('keydown',function(ev){
+  if(ev.key==='ArrowLeft')ml();else if(ev.key==='ArrowRight')mr();
+  else if(ev.key==='ArrowUp')rot();else if(ev.key==='ArrowDown')sd();
+  else if(ev.key===' '){ev.preventDefault();hd();}
 });
 </script>
 </body>
