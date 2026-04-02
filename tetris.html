@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>TETRIS FOR PUFFS 💨</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body { background:#0a0a0f; color:#fff; font-family:'Courier New',monospace; min-height:100vh; display:flex; flex-direction:column; align-items:center; overflow:hidden; }
+    
+    h1 { font-size:1.4rem; letter-spacing:.15em; margin:16px 0 4px; text-shadow:0 0 20px #b41e1e; text-align:center; }
+    h1 span { color:#b41e1e; }
+    .subtitle { color:#666; font-size:.7rem; letter-spacing:.2em; margin-bottom:12px; text-align:center; }
+    
+    .game-area { position:relative; display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+    
+    canvas { border:2px solid #b41e1e44; border-radius:4px; background:#0f0f18; image-rendering:pixelated; display:block; }
+    
+    .sidebar { display:flex; flex-direction:column; gap:12px; min-width:120px; }
+    .stat { background:#0f0f18; border:1px solid #b41e1e33; border-radius:6px; padding:12px; text-align:center; }
+    .stat-label { font-size:.6rem; color:#b41e1e; letter-spacing:.2em; margin-bottom:4px; }
+    .stat-value { font-size:1.4rem; font-weight:bold; }
+    
+    .next-box { background:#0f0f18; border:1px solid #b41e1e33; border-radius:6px; padding:12px; text-align:center; }
+    .next-box canvas { margin:8px auto 0; border:1px solid #b41e1e22; }
+    
+    .controls { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; justify-content:center; }
+    .ctrl-btn { background:#1a1a2e; border:2px solid #b41e1e44; border-radius:8px; color:#fff; font-size:1.5rem; width:60px; height:60px; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; }
+    .ctrl-btn:active { background:#b41e1e33; border-color:#b41e1e; }
+    .ctrl-row { display:flex; gap:8px; }
+    
+    .overlay { position:absolute; top:0;left:0;right:0;bottom:0; background:#0a0a0fdd; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:4px; z-index:10; }
+    .overlay.hidden { display:none; }
+    .overlay h2 { font-size:1.6rem; color:#b41e1e; margin-bottom:8px; letter-spacing:.15em; }
+    .overlay p { color:#888; font-size:.8rem; margin-bottom:16px; }
+    .play-btn { background:#b41e1e; color:#fff; border:none; padding:16px 40px; border-radius:8px; font-family:inherit; font-size:1rem; font-weight:bold; letter-spacing:.15em; min-height:52px; cursor:pointer; }
+    .play-btn:active { background:#d42020; }
+    
+    .nav-back { color:#b41e1e; text-decoration:none; font-size:.8rem; padding:10px 16px; border:1px solid #b41e1e44; border-radius:6px; position:absolute; top:12px; left:12px; z-index:20; }
+    
+    .roast { color:#b41e1e; font-size:.75rem; text-align:center; margin-top:8px; min-height:20px; font-style:italic; }
+
+    @media(max-width:500px) {
+      .sidebar { flex-direction:row; flex-wrap:wrap; justify-content:center; }
+      .stat { min-width:80px; }
+    }
+  </style>
+</head>
+<body>
+
+<a href="/" class="nav-back">← BACK</a>
+<h1>TETRIS FOR <span>PUFFS</span> 💨</h1>
+<div class="subtitle">FEATURING YOUR MATES' FACES</div>
+
+<div class="game-area">
+  <div style="position:relative">
+    <canvas id="board" width="300" height="600"></canvas>
+    <div class="overlay" id="start-overlay">
+      <h2>TETRIS FOR PUFFS</h2>
+      <p>Your mates are falling... literally</p>
+      <button class="play-btn" onclick="startGame()">PLAY</button>
+    </div>
+    <div class="overlay hidden" id="gameover-overlay">
+      <h2>GAME OVER</h2>
+      <p id="final-score">Score: 0</p>
+      <p id="gameover-roast"></p>
+      <button class="play-btn" onclick="startGame()">AGAIN?</button>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div class="stat"><div class="stat-label">SCORE</div><div class="stat-value" id="score">0</div></div>
+    <div class="stat"><div class="stat-label">LINES</div><div class="stat-value" id="lines">0</div></div>
+    <div class="stat"><div class="stat-label">LEVEL</div><div class="stat-value" id="level">1</div></div>
+    <div class="next-box">
+      <div class="stat-label">NEXT PUFF</div>
+      <canvas id="next" width="120" height="120"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="roast" id="roast"></div>
+
+<div class="controls" id="touch-controls">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+    <div class="ctrl-btn" ontouchstart="rotate()" onclick="rotate()">↻</div>
+    <div class="ctrl-row">
+      <div class="ctrl-btn" ontouchstart="moveLeft()" onclick="moveLeft()">←</div>
+      <div class="ctrl-btn" ontouchstart="hardDrop()" onclick="hardDrop()">⬇</div>
+      <div class="ctrl-btn" ontouchstart="moveRight()" onclick="moveRight()">→</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLS = 10, ROWS = 20, SZ = 30;
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const nextCanvas = document.getElementById('next');
+const nextCtx = nextCanvas.getContext('2d');
+
+const FACES = ['game/face1.jpg','game/face2.jpg','game/face3.png','game/face4.jpg','game/face5.png','game/face6.jpg'];
+const faceImgs = FACES.map(src => { const img = new Image(); img.src = src; return img; });
+
+const ROASTS = [
+  "That's embarrassing 💀",
+  "Even your nan plays better",
+  "Certified puff moment",
+  "L + ratio + skill issue",
+  "Bro thinks he's good 😂",
+  "My grandma called, she wants her reflexes back",
+  "You dropped this: 🤡",
+  "Peak puff performance right here",
+  "That was... something",
+  "Are you even trying lmao",
+  "POV: you have no thumbs",
+  "This is why they call it Tetris for PUFFS"
+];
+
+const LINE_ROASTS = [
+  "1 line? That's cute",
+  "Ok maybe you're not completely hopeless",
+  "Oi not bad puff",
+  "Tetris! Even a broken clock...",
+  "SHEESH ok go off 🔥"
+];
+
+const SHAPES = [
+  [[1,1,1,1]],
+  [[1,1],[1,1]],
+  [[0,1,0],[1,1,1]],
+  [[1,0,0],[1,1,1]],
+  [[0,0,1],[1,1,1]],
+  [[1,1,0],[0,1,1]],
+  [[0,1,1],[1,1,0]]
+];
+
+let board, current, next, score, lines, level, gameOver, dropTimer, dropInterval, faceMap;
+
+function init() {
+  board = Array.from({length:ROWS}, () => Array(COLS).fill(0));
+  faceMap = Array.from({length:ROWS}, () => Array(COLS).fill(-1));
+  score = 0; lines = 0; level = 1; gameOver = false;
+  dropInterval = 800;
+  updateUI();
+}
+
+function randomPiece() {
+  const shape = SHAPES[Math.floor(Math.random()*SHAPES.length)];
+  const face = Math.floor(Math.random()*6);
+  return { shape, face, x: Math.floor(COLS/2)-Math.floor(shape[0].length/2), y: 0 };
+}
+
+function startGame() {
+  document.getElementById('start-overlay').classList.add('hidden');
+  document.getElementById('gameover-overlay').classList.add('hidden');
+  init();
+  current = randomPiece();
+  next = randomPiece();
+  drawNext();
+  clearInterval(dropTimer);
+  dropTimer = setInterval(tick, dropInterval);
+  draw();
+}
+
+function valid(piece, dx, dy, shape) {
+  shape = shape || piece.shape;
+  for(let r=0; r<shape.length; r++)
+    for(let c=0; c<shape[r].length; c++)
+      if(shape[r][c]) {
+        const nx = piece.x+c+dx, ny = piece.y+r+dy;
+        if(nx<0||nx>=COLS||ny>=ROWS) return false;
+        if(ny>=0 && board[ny][nx]) return false;
+      }
+  return true;
+}
+
+function lock() {
+  for(let r=0; r<current.shape.length; r++)
+    for(let c=0; c<current.shape[r].length; c++)
+      if(current.shape[r][c]) {
+        const ny = current.y+r;
+        if(ny<0) { endGame(); return; }
+        board[ny][current.x+c] = 1;
+        faceMap[ny][current.x+c] = current.face;
+      }
+  clearLines();
+  current = next;
+  next = randomPiece();
+  drawNext();
+  if(!valid(current,0,0)) endGame();
+}
+
+function clearLines() {
+  let cleared = 0;
+  for(let r=ROWS-1; r>=0; r--) {
+    if(board[r].every(v=>v)) {
+      board.splice(r,1);
+      board.unshift(Array(COLS).fill(0));
+      faceMap.splice(r,1);
+      faceMap.unshift(Array(COLS).fill(-1));
+      cleared++; r++;
+    }
+  }
+  if(cleared) {
+    lines += cleared;
+    score += [0,100,300,500,800][cleared] * level;
+    level = Math.floor(lines/10)+1;
+    dropInterval = Math.max(100, 800-((level-1)*70));
+    clearInterval(dropTimer);
+    dropTimer = setInterval(tick, dropInterval);
+    updateUI();
+    if(cleared < 5) document.getElementById('roast').textContent = LINE_ROASTS[Math.min(cleared,4)] || '';
+  }
+}
+
+function endGame() {
+  gameOver = true;
+  clearInterval(dropTimer);
+  document.getElementById('final-score').textContent = 'Score: '+score+' | Lines: '+lines;
+  document.getElementById('gameover-roast').textContent = ROASTS[Math.floor(Math.random()*ROASTS.length)];
+  document.getElementById('gameover-overlay').classList.remove('hidden');
+}
+
+function tick() {
+  if(gameOver) return;
+  if(valid(current,0,1)) current.y++;
+  else lock();
+  draw();
+}
+
+function moveLeft() { if(!gameOver && valid(current,-1,0)) { current.x--; draw(); } }
+function moveRight() { if(!gameOver && valid(current,1,0)) { current.x++; draw(); } }
+function rotate() {
+  if(gameOver) return;
+  const s = current.shape;
+  const rotated = s[0].map((_, i) => s.map(row => row[i]).reverse());
+  if(valid(current,0,0,rotated)) { current.shape = rotated; draw(); }
+}
+function hardDrop() {
+  if(gameOver) return;
+  while(valid(current,0,1)) { current.y++; score += 2; }
+  lock(); draw(); updateUI();
+}
+
+function draw() {
+  ctx.fillStyle = '#0f0f18';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  
+  // Grid lines
+  ctx.strokeStyle = '#1a1a2e';
+  ctx.lineWidth = 0.5;
+  for(let r=0; r<ROWS; r++) { ctx.beginPath(); ctx.moveTo(0,r*SZ); ctx.lineTo(COLS*SZ,r*SZ); ctx.stroke(); }
+  for(let c=0; c<COLS; c++) { ctx.beginPath(); ctx.moveTo(c*SZ,0); ctx.lineTo(c*SZ,ROWS*SZ); ctx.stroke(); }
+  
+  // Locked pieces
+  for(let r=0; r<ROWS; r++)
+    for(let c=0; c<COLS; c++)
+      if(board[r][c]) drawBlock(ctx, c*SZ, r*SZ, SZ, faceMap[r][c]);
+  
+  // Ghost piece
+  let ghostY = current.y;
+  while(valid({...current, y:ghostY},0,1)) ghostY++;
+  ctx.globalAlpha = 0.2;
+  for(let r=0; r<current.shape.length; r++)
+    for(let c=0; c<current.shape[r].length; c++)
+      if(current.shape[r][c]) drawBlock(ctx,(current.x+c)*SZ,(ghostY+r)*SZ,SZ,current.face);
+  ctx.globalAlpha = 1;
+  
+  // Current piece
+  for(let r=0; r<current.shape.length; r++)
+    for(let c=0; c<current.shape[r].length; c++)
+      if(current.shape[r][c]) drawBlock(ctx,(current.x+c)*SZ,(current.y+r)*SZ,SZ,current.face);
+}
+
+function drawBlock(context, x, y, size, faceIdx) {
+  const img = faceImgs[faceIdx];
+  if(img && img.complete && img.naturalWidth) {
+    context.drawImage(img, x+1, y+1, size-2, size-2);
+  } else {
+    const colors = ['#b41e1e','#1e7eb4','#1eb44e','#b4a01e','#8e1eb4','#b4651e'];
+    context.fillStyle = colors[faceIdx] || '#b41e1e';
+    context.fillRect(x+1, y+1, size-2, size-2);
+  }
+  context.strokeStyle = '#b41e1e44';
+  context.lineWidth = 1;
+  context.strokeRect(x+1, y+1, size-2, size-2);
+}
+
+function drawNext() {
+  nextCtx.fillStyle = '#0f0f18';
+  nextCtx.fillRect(0,0,120,120);
+  const s = next.shape;
+  const ox = Math.floor((120 - s[0].length*SZ)/2);
+  const oy = Math.floor((120 - s.length*SZ)/2);
+  for(let r=0; r<s.length; r++)
+    for(let c=0; c<s[r].length; c++)
+      if(s[r][c]) drawBlock(nextCtx, ox+c*SZ, oy+r*SZ, SZ, next.face);
+}
+
+function updateUI() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('lines').textContent = lines;
+  document.getElementById('level').textContent = level;
+}
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if(e.key==='ArrowLeft') moveLeft();
+  else if(e.key==='ArrowRight') moveRight();
+  else if(e.key==='ArrowUp') rotate();
+  else if(e.key==='ArrowDown') tick();
+  else if(e.key===' ') { e.preventDefault(); hardDrop(); }
+});
+</script>
+</body>
+</html>
