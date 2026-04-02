@@ -14,7 +14,7 @@
     
     .game-area { position:relative; display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
     
-    canvas { border:2px solid #b41e1e44; border-radius:4px; background:#0f0f18; image-rendering:pixelated; display:block; }
+    canvas { border:2px solid #b41e1e44; border-radius:4px; background:#0f0f18;  display:block; }
     
     .sidebar { display:flex; flex-direction:column; gap:12px; min-width:120px; }
     .stat { background:#0f0f18; border:1px solid #b41e1e33; border-radius:6px; padding:12px; text-align:center; }
@@ -54,7 +54,7 @@
 
 <div class="game-area">
   <div style="position:relative">
-    <canvas id="board" width="300" height="600"></canvas>
+    <canvas id="board" width="320" height="600"></canvas>
     <div class="overlay" id="start-overlay">
       <h2>TETRIS FOR PUFFS</h2>
       <p>Your mates are falling... literally</p>
@@ -82,18 +82,20 @@
 
 <div class="controls" id="touch-controls">
   <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-    <div class="ctrl-btn" ontouchstart="rotate()" onclick="rotate()">↻</div>
+    <div class="ctrl-btn" ontouchstart="e(event);rotate()" onclick="rotate()">↻</div>
     <div class="ctrl-row">
-      <div class="ctrl-btn" ontouchstart="moveLeft()" onclick="moveLeft()">←</div>
-      <div class="ctrl-btn" ontouchstart="hardDrop()" onclick="hardDrop()">⬇</div>
-      <div class="ctrl-btn" ontouchstart="moveRight()" onclick="moveRight()">→</div>
+      <div class="ctrl-btn" ontouchstart="e(event);moveLeft()" onclick="moveLeft()">←</div>
+      <div class="ctrl-btn" ontouchstart="e(event);hardDrop()" onclick="hardDrop()">⬇</div>
+      <div class="ctrl-btn" ontouchstart="e(event);moveRight()" onclick="moveRight()">→</div>
     </div>
   </div>
 </div>
 
 <script>
-const COLS = 10, ROWS = 20, SZ = 30;
+const COLS = 8, ROWS = 15, SZ = 40;
 const canvas = document.getElementById('board');
+canvas.width = COLS * SZ;
+canvas.height = ROWS * SZ;
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next');
 const nextCtx = nextCanvas.getContext('2d');
@@ -302,6 +304,11 @@ function updateUI() {
   document.getElementById('lines').textContent = lines;
   document.getElementById('level').textContent = level;
 }
+
+function e(ev){ev.preventDefault();}
+
+// Prevent scrolling on game
+document.body.addEventListener("touchmove",ev=>ev.preventDefault(),{passive:false});
 
 // Keyboard
 document.addEventListener('keydown', e => {
