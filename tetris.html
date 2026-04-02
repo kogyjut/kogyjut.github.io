@@ -19,17 +19,25 @@
     .controls{display:flex;justify-content:center;gap:10px;padding:8px 12px}
     .ctrl-btn{background:#1a1a2e;border:2px solid #b41e1e55;border-radius:14px;color:#fff;font-size:2rem;flex:1;max-width:80px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;user-select:none}
     .ctrl-btn:active{background:#b41e1e44;border-color:#b41e1e}
-    .overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:#0a0a0fee;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;z-index:10}
+    .overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:#0a0a0fee;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;z-index:10;overflow-y:auto}
     .overlay.hidden{display:none}
     .overlay h2{font-size:1.3rem;color:#b41e1e;margin-bottom:6px;letter-spacing:.1em}
     .overlay p{color:#888;font-size:.7rem;margin-bottom:10px;text-align:center;padding:0 16px}
     .play-btn{background:#b41e1e;color:#fff;border:none;padding:18px 52px;border-radius:12px;font-family:inherit;font-size:1.1rem;font-weight:bold;letter-spacing:.1em}
     .play-btn:active{background:#d42020}
     .nav-back{color:#b41e1e;text-decoration:none;font-size:.7rem;padding:6px 10px;position:absolute;top:2px;left:6px;z-index:20}
+    .name-input{background:#1a1a2e;border:2px solid #b41e1e44;border-radius:8px;color:#fff;padding:12px;font-family:inherit;font-size:1rem;width:90%;max-width:300px;margin-bottom:12px;text-align:center}
+    .leaderboard{width:100%;max-width:350px;text-align:left;font-size:.8rem;margin-top:8px}
+    .leaderboard-entry{background:#1a1a2e;border-left:3px solid #b41e1e44;padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+    .leaderboard-entry.top1{border-left-color:#ffd700}
+    .leaderboard-entry.top2{border-left-color:#c0c0c0}
+    .leaderboard-entry.top3{border-left-color:#cd7f32}
+    .rank{color:#b41e1e;font-weight:bold;margin-right:8px}
+    .score{color:#4ade80}
   </style>
 </head>
 <body>
-<a href="/" class="nav-back">← BACK</a>
+<a href="/" class="nav-back">← HOME</a>
 <div class="header"><h1><span>TETRISBUD</span> 💨</h1></div>
 <div class="stats">
   <div class="stat"><div class="stat-label">SCORE</div><div class="stat-value" id="score">0</div></div>
@@ -48,7 +56,10 @@
       <h2>GAME OVER</h2>
       <p id="final-score"></p>
       <p id="gameover-roast"></p>
-      <button class="play-btn" onclick="startGame()">AGAIN</button>
+      <input type="text" class="name-input" id="player-name" placeholder="your name" maxlength="20">
+      <button class="play-btn" onclick="saveName()">SAVE SCORE</button>
+      <button class="play-btn" style="background:#666;margin-top:8px" onclick="startGame()">PLAY AGAIN</button>
+      <div class="leaderboard" id="leaderboard"></div>
     </div>
   </div>
 </div>
@@ -79,6 +90,40 @@ var SHAPES=[[[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[1,0,0],[1,1,1]],[[0,0,
 
 var board,current,score,lines,level,gameOver,timer,interval;
 
+// Leaderboard
+function loadScores(){
+  var s=localStorage.getItem('tetrisbud_scores');
+  return s?JSON.parse(s):[];
+}
+function saveScores(s){
+  localStorage.setItem('tetrisbud_scores',JSON.stringify(s));
+}
+function saveName(){
+  var name=document.getElementById('player-name').value.trim();
+  if(!name){alert('Enter your name!');return;}
+  var scores=loadScores();
+  scores.push({name:name,score:score,lines:lines,level:level,date:new Date().toLocaleString()});
+  scores.sort(function(a,b){return b.score-a.score;});
+  saveScores(scores.slice(0,50));
+  showLeaderboard();
+  document.getElementById('player-name').value='';
+}
+function showLeaderboard(){
+  var scores=loadScores();
+  var html='<h3 style="color:#b41e1e;margin-bottom:8px">🏆 TOP SCORES</h3>';
+  if(!scores.length){html+='<p style="color:#666">No scores yet</p>';}
+  else{
+    scores.slice(0,10).forEach(function(s,i){
+      var cls='leaderboard-entry';
+      if(i===0)cls+=' top1';
+      else if(i===1)cls+=' top2';
+      else if(i===2)cls+=' top3';
+      html+='<div class="'+cls+'"><span><span class="rank">#'+(i+1)+'</span>'+s.name+'</span><span class="score">'+s.score+'</span></div>';
+    });
+  }
+  document.getElementById('leaderboard').innerHTML=html;
+}
+
 function init(){board=[];for(var i=0;i<ROWS;i++){var row=[];for(var j=0;j<COLS;j++)row.push(0);board.push(row);}score=0;lines=0;level=1;gameOver=false;interval=600;ui();}
 function rp(){var s=SHAPES[Math.floor(Math.random()*SHAPES.length)];return{shape:s,x:Math.floor(COLS/2)-Math.floor(s[0].length/2),y:0};}
 function startGame(){document.getElementById('start-overlay').classList.add('hidden');document.getElementById('gameover-overlay').classList.add('hidden');init();current=rp();clearInterval(timer);timer=setInterval(tick,interval);draw();}
@@ -92,7 +137,7 @@ function lock(){
   if(cl){lines+=cl;score+=[0,100,300,500,800][cl]*level;level=Math.floor(lines/10)+1;interval=Math.max(80,600-((level-1)*50));clearInterval(timer);timer=setInterval(tick,interval);ui();document.getElementById('roast').textContent=LROASTS[Math.min(cl,4)]||'';}
   current=rp();if(!ok(current,0,0))endG();
 }
-function endG(){gameOver=true;clearInterval(timer);document.getElementById('final-score').textContent='Score: '+score+' | Lines: '+lines;document.getElementById('gameover-roast').textContent=ROASTS[Math.floor(Math.random()*ROASTS.length)];document.getElementById('gameover-overlay').classList.remove('hidden');}
+function endG(){gameOver=true;clearInterval(timer);document.getElementById('final-score').textContent='Score: '+score+' | Lines: '+lines;document.getElementById('gameover-roast').textContent=ROASTS[Math.floor(Math.random()*ROASTS.length)];showLeaderboard();document.getElementById('gameover-overlay').classList.remove('hidden');document.getElementById('player-name').focus();}
 function tick(){if(gameOver)return;if(ok(current,0,1))current.y++;else lock();draw();}
 function ml(){if(!gameOver&&ok(current,-1,0)){current.x--;draw();}}
 function mr(){if(!gameOver&&ok(current,1,0)){current.x++;draw();}}
@@ -153,6 +198,9 @@ document.addEventListener('keydown',function(ev){
   else if(ev.key==='ArrowUp')rot();else if(ev.key==='ArrowDown')sd();
   else if(ev.key===' '){ev.preventDefault();hd();}
 });
+
+// Load leaderboard on start
+showLeaderboard();
 </script>
 </body>
 </html>
