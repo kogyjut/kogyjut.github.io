@@ -1,0 +1,45 @@
+name: Scrape Clothing Data
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"   # runs every 8 hours
+  workflow_dispatch:          # lets you run it manually from GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-scrapling
+
+      - name: Install Scrapling
+        run: pip install scrapling[camoufox]
+
+      - name: Install Camoufox browser
+        run: scrapling install camoufox --headless
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit data.json if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --staged --quiet && echo "No changes" || git commit -m "chore: update clothing data $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
