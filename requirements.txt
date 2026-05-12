@@ -1,1 +1,3 @@
 scrapling[camoufox]
+fastapi
+uvicorn

@@ -56,8 +56,65 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 .loading-dot:nth-child(2) { animation-delay:.2s; }
 .loading-dot:nth-child(3) { animation-delay:.4s; }
 @keyframes pulse { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
-.status-bar { font-size:11px; color:#888; padding:4px 0 0; text-align:right; }
 @media (max-width:600px) { h1 { font-size:22px; } .toolbar { flex-direction:column; align-items:stretch; } .stats { margin-left:0; text-align:center; } }
+
+/* ── Scrape Button ─────────────────────────────────────────────────────────── */
+.scrape-btn {
+  display:block; width:100%; margin:22px 0 0;
+  padding:26px 20px;
+  background:#111; color:#fff;
+  border:none; border-radius:14px;
+  font:700 22px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing:.05em; text-transform:uppercase;
+  cursor:pointer;
+  transition:background .12s ease, transform .12s ease, box-shadow .12s ease;
+  box-shadow:0 4px 20px rgba(0,0,0,.18);
+}
+.scrape-btn:hover { background:#000; transform:translateY(-2px); box-shadow:0 8px 28px rgba(0,0,0,.22); }
+.scrape-btn.open { background:#333; border-radius:14px 14px 0 0; transform:none; box-shadow:none; }
+
+/* ── Scrape Panel ──────────────────────────────────────────────────────────── */
+.scrape-panel {
+  background:#fff; border:1px solid #e5e5e5; border-top:none;
+  border-radius:0 0 14px 14px; padding:20px 20px 24px;
+  margin-bottom:22px;
+}
+.scrape-controls {
+  display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;
+  padding-bottom:16px; border-bottom:1px solid #f0f0f0; margin-bottom:16px;
+}
+.scrape-field { display:flex; flex-direction:column; gap:5px; }
+.scrape-field label { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:#888; font-weight:600; }
+.scrape-field input, .scrape-field select {
+  padding:9px 11px; border:1px solid #d4d4d4; border-radius:7px;
+  font:inherit; font-size:13px; background:#fff;
+  transition:border-color .1s;
+}
+.scrape-field input:focus, .scrape-field select:focus { outline:none; border-color:#111; }
+.scrape-field input[type=text] { width:260px; }
+.scrape-field input[type=number] { width:110px; }
+.scrape-field select { width:160px; }
+.scrape-filter-row { display:flex; gap:8px; flex-wrap:wrap; }
+.scrape-filter-row .chip { font-size:11.5px; }
+.run-btn {
+  padding:10px 28px; background:#111; color:#fff;
+  border:none; border-radius:7px; font:700 13px/1 inherit;
+  letter-spacing:.04em; text-transform:uppercase; cursor:pointer;
+  transition:background .1s, transform .1s;
+  align-self:flex-end;
+}
+.run-btn:hover { background:#000; transform:translateY(-1px); }
+.run-btn:disabled { background:#999; cursor:not-allowed; transform:none; }
+.scrape-status {
+  font-size:12.5px; color:#666; margin-bottom:14px; min-height:20px;
+}
+.scrape-status.err { color:#c0392b; }
+.scrape-status.ok { color:#2e7d32; }
+.live-tag {
+  display:inline-block; font-size:10px; padding:2px 7px; border-radius:999px;
+  background:#111; color:#fff; font-weight:700; letter-spacing:.05em;
+  margin-right:6px; vertical-align:middle;
+}
 </style>
 </head>
 <body>
@@ -65,26 +122,71 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <header>
 <div>
 <h1>AI Cloths Finder — Archive Picks</h1>
-<p class="sub">Live archive and designer finds under 500 AUD — scraped from Grailed. Authentic pieces from Rick Owens, Yohji, Undercover, Raf Simons and more.</p>
+<p class="sub">Live archive and designer finds under 500 AUD — auto-scraped from Grailed every 8 hours. Tap the button below to search any site live.</p>
 </div>
 <span class="lastup" id="lastupdated">Loading...</span>
 </header>
+
+<!-- ── GIANT SCRAPE BUTTON ───────────────────────────────────────────────── -->
+<button class="scrape-btn" id="scrapeBtn" onclick="togglePanel()">
+  Search &amp; Scrape for Clothes
+</button>
+
+<!-- ── SCRAPE PANEL ──────────────────────────────────────────────────────── -->
+<div class="scrape-panel hide" id="scrapePanel">
+  <div class="scrape-controls">
+
+    <div class="scrape-field">
+      <label>Site</label>
+      <select id="scrapeSite">
+        <option value="grailed">Grailed</option>
+        <option value="depop">Depop</option>
+        <option value="vestiaire">Vestiaire Collective</option>
+      </select>
+    </div>
+
+    <div class="scrape-field">
+      <label>Keyword</label>
+      <input type="text" id="scrapeKeyword" placeholder="e.g. rick owens jacket" onkeydown="if(event.key==='Enter')runScrape()">
+    </div>
+
+    <div class="scrape-field">
+      <label>Max Price (AUD)</label>
+      <input type="number" id="scrapeMaxPrice" value="500" min="10" max="5000" step="10">
+    </div>
+
+    <button class="run-btn" id="runBtn" onclick="runScrape()">Scrape</button>
+  </div>
+
+  <div class="scrape-filter-row" style="margin-bottom:14px;">
+    <span style="font-size:11px;color:#888;align-self:center;margin-right:4px;">Filter results:</span>
+    <span class="chip active" data-sf="all" onclick="setSFilter(this)">All</span>
+    <span class="chip" data-sf="auth" onclick="setSFilter(this)">Authentic only</span>
+    <span class="chip" data-sf="under250" onclick="setSFilter(this)">Under 250 AUD</span>
+  </div>
+
+  <div class="scrape-status" id="scrapeStatus"></div>
+  <div class="grid" id="scrapeGrid"></div>
+</div>
+
+<!-- ── SCHEDULED PICKS TOOLBAR ───────────────────────────────────────────── -->
 <div class="toolbar">
-<input id="q" type="search" placeholder="Search brand, item, site...">
-<span class="chip active" data-filter="all">All</span>
-<span class="chip" data-filter="auth">Authentic</span>
-<span class="chip" data-filter="rep">Reps only</span>
-<span class="chip" data-filter="under250">Under 250 AUD</span>
-<span class="stats">Showing <b id="count">—</b> of <b id="total">—</b></span>
+  <input id="q" type="search" placeholder="Search scheduled picks...">
+  <span class="chip active" data-filter="all">All</span>
+  <span class="chip" data-filter="auth">Authentic</span>
+  <span class="chip" data-filter="rep">Reps only</span>
+  <span class="chip" data-filter="under250">Under 250 AUD</span>
+  <span class="stats">Showing <b id="count">—</b> of <b id="total">—</b></span>
 </div>
 <div class="grid" id="grid">
-<div class="loading">
-<span class="loading-dot">•</span>
-<span class="loading-dot">•</span>
-<span class="loading-dot">•</span>
-<br><br>Loading live listings…
+  <div class="loading">
+    <span class="loading-dot">•</span>
+    <span class="loading-dot">•</span>
+    <span class="loading-dot">•</span>
+    <br><br>Loading scheduled picks…
+  </div>
 </div>
-</div>
+
 <div class="section-h">Where to keep looking</div>
 <div class="sites">
 <div class="site"><b>Buyee</b><p>Proxy for Yahoo Auctions JP, Mercari JP, ZOZO.</p><a href="https://buyee.jp" target="_blank">buyee.jp</a></div>
@@ -99,96 +201,182 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <div class="site"><b>r/RepArchive</b><p>Community QC photos.</p><a href="https://www.reddit.com/r/RepArchive/" target="_blank">reddit.com/r/RepArchive</a></div>
 </div>
 <div class="disclaimer"><b>Heads-up:</b> Archive marketplaces move fast. AUD prices exclude proxy fees and intl shipping. Sizing on JP archive runs small. Always ask sellers for measurements before bidding. Listings are scraped live and may have sold.</div>
-<footer><p>Personal archive shopping list. Hosted on GitHub Pages. Data refreshed automatically via Scrapling.</p></footer>
+<footer><p>Personal archive shopping list. Hosted on GitHub Pages. Powered by Scrapling.</p></footer>
 </div>
-<script>
-let items = [];
-let activeFilter = 'all';
 
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATE THIS after deploying the API to Render:
+//   https://dashboard.render.com → New Web Service → connect your repo
+//   then paste the URL it gives you below (no trailing slash)
+// ─────────────────────────────────────────────────────────────────────────────
+const SCRAPE_API = 'https://YOUR-APP.onrender.com';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+function cardHTML(it) {
+  const tagH = it.rep === 'rep'
+    ? '<span class="tag rep">REP</span>'
+    : '<span class="tag auth">AUTHENTIC</span>';
+  const undH = it.under ? '<span class="tag under">under 250 AUD</span>' : '';
+  const imgH = it.image
+    ? `<img src="${esc(it.image)}" alt="${esc(it.item)}" loading="lazy" onerror="this.parentElement.innerHTML='No preview'">`
+    : 'No preview — open listing for photos';
+  return `<div class="card">
+    <div class="img">${imgH}</div>
+    <div class="body">
+      <div class="brand">${esc(it.brand)}${it.n ? ' #' + it.n : ''}</div>
+      <div class="title">${esc(it.item)}</div>
+      ${it.desc ? `<div class="desc">${esc(it.desc)}</div>` : ''}
+      <div>${tagH}${undH}</div>
+      <dl class="meta">
+        <dt>Size</dt><dd>${esc(it.size)}</dd>
+        <dt>Price</dt><dd><span class="price">$${it.aud}</span> <span class="aud">AUD &mdash; ${esc(it.origPrice)}</span></dd>
+        <dt>Site</dt><dd>${esc(it.site)}</dd>
+      </dl>
+      ${it.notes ? `<div class="notes">${esc(it.notes)}</div>` : ''}
+      <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">View listing</a>
+    </div>
+  </div>`;
+}
+
+// ── Scheduled picks (data.json) ───────────────────────────────────────────────
+let items = [];
+let activeFilter = 'all';
 
 function render() {
   const q = document.getElementById('q').value.trim().toLowerCase();
   const grid = document.getElementById('grid');
   const countEl = document.getElementById('count');
   const totalEl = document.getElementById('total');
-
   if (!items.length) {
-    grid.innerHTML = '<div class="loading">No listings loaded yet. The scraper may still be running for the first time.</div>';
-    countEl.textContent = '0';
-    totalEl.textContent = '0';
+    grid.innerHTML = '<div class="loading">No listings loaded yet — run the GitHub Action to populate.</div>';
+    countEl.textContent = '0'; totalEl.textContent = '0';
     return;
   }
-
-  let v = 0;
-  let html = '';
-
+  let v = 0, html = '';
   for (const it of items) {
-    const mq = !q || (it.brand + ' ' + it.item + ' ' + it.desc + ' ' + it.site + ' ' + it.notes).toLowerCase().includes(q);
-    const mf = activeFilter === 'all'
-      || (activeFilter === 'auth' && it.rep === 'auth')
-      || (activeFilter === 'rep' && it.rep === 'rep')
-      || (activeFilter === 'under250' && it.under);
-    const show = mq && mf;
-    if (show) v++;
-
-    const tagH = it.rep === 'rep'
-      ? '<span class="tag rep">REP</span>'
-      : '<span class="tag auth">AUTHENTIC</span>';
-    const undH = it.under ? '<span class="tag under">under 250 AUD</span>' : '';
-
-    const imgH = it.image
-      ? `<img src="${esc(it.image)}" alt="${esc(it.item)}" loading="lazy" onerror="this.parentElement.textContent='No preview'">`
-      : 'No preview, open listing for photos';
-
-    html += `<div class="card${show ? '' : ' hide'}">` +
-      `<div class="img">${imgH}</div>` +
-      `<div class="body">` +
-      `<div class="brand">${esc(it.brand)} #${it.n}</div>` +
-      `<div class="title">${esc(it.item)}</div>` +
-      (it.desc ? `<div class="desc">${esc(it.desc)}</div>` : '') +
-      `<div>${tagH}${undH}</div>` +
-      `<dl class="meta">` +
-      `<dt>Size</dt><dd>${esc(it.size)}</dd>` +
-      `<dt>Price</dt><dd><span class="price">$${it.aud}</span> <span class="aud">AUD — ${esc(it.origPrice)}</span></dd>` +
-      `<dt>Site</dt><dd>${esc(it.site)}</dd>` +
-      `</dl>` +
-      (it.notes ? `<div class="notes">${esc(it.notes)}</div>` : '') +
-      `<a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">View listing</a>` +
-      `</div></div>`;
+    const mq = !q || (it.brand+' '+it.item+' '+it.desc+' '+it.site+' '+it.notes).toLowerCase().includes(q);
+    const mf = activeFilter==='all'
+      ||(activeFilter==='auth'&&it.rep==='auth')
+      ||(activeFilter==='rep'&&it.rep==='rep')
+      ||(activeFilter==='under250'&&it.under);
+    if (mq&&mf) v++;
+    html += `<div class="card${mq&&mf?'':' hide'}">${cardHTML(it).slice(cardHTML(it).indexOf('>')+1, -6)}</div>`;
   }
-
-  grid.innerHTML = html;
-  countEl.textContent = v;
-  totalEl.textContent = items.length;
+  grid.innerHTML = html || '<div class="loading">No results match your filters.</div>';
+  countEl.textContent = v; totalEl.textContent = items.length;
 }
 
 async function loadData() {
   try {
     const resp = await fetch('data.json?t=' + Date.now());
-    if (!resp.ok) throw new Error('data.json not found');
+    if (!resp.ok) throw new Error('missing');
     const data = await resp.json();
     items = data.items || [];
-    const lu = data.last_updated || 'Unknown';
-    document.getElementById('lastupdated').textContent = 'Last updated: ' + lu;
+    document.getElementById('lastupdated').textContent = 'Last updated: ' + (data.last_updated || '—');
     render();
-  } catch (e) {
-    document.getElementById('lastupdated').textContent = 'Scraper not run yet';
-    document.getElementById('grid').innerHTML =
-      '<div class="loading">No data.json found yet — run the GitHub Action first to populate listings.</div>';
+  } catch {
+    document.getElementById('lastupdated').textContent = 'Not yet scraped';
+    document.getElementById('grid').innerHTML = '<div class="loading">Run the GitHub Action first to load scheduled picks.</div>';
   }
 }
 
-document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
-  document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+document.querySelectorAll('.toolbar .chip').forEach(c => c.addEventListener('click', () => {
+  document.querySelectorAll('.toolbar .chip').forEach(x => x.classList.remove('active'));
   c.classList.add('active');
   activeFilter = c.dataset.filter;
   render();
 }));
 document.getElementById('q').addEventListener('input', render);
 
+// ── Scrape Panel ──────────────────────────────────────────────────────────────
+let scrapeFilter = 'all';
+let scrapeResults = [];
+
+function togglePanel() {
+  const btn = document.getElementById('scrapeBtn');
+  const panel = document.getElementById('scrapePanel');
+  const open = !panel.classList.contains('hide');
+  panel.classList.toggle('hide', open);
+  btn.classList.toggle('open', !open);
+  if (!open) document.getElementById('scrapeKeyword').focus();
+}
+
+function setSFilter(el) {
+  document.querySelectorAll('.scrape-filter-row .chip').forEach(x => x.classList.remove('active'));
+  el.classList.add('active');
+  scrapeFilter = el.dataset.sf;
+  renderScrapeGrid();
+}
+
+function renderScrapeGrid() {
+  const grid = document.getElementById('scrapeGrid');
+  if (!scrapeResults.length) { grid.innerHTML = ''; return; }
+  const filtered = scrapeResults.filter(it =>
+    scrapeFilter === 'all' ||
+    (scrapeFilter === 'auth' && it.rep === 'auth') ||
+    (scrapeFilter === 'under250' && it.under)
+  );
+  grid.innerHTML = filtered.length
+    ? filtered.map(cardHTML).join('')
+    : '<div class="loading" style="padding:30px">No results match that filter.</div>';
+}
+
+async function runScrape() {
+  const keyword = document.getElementById('scrapeKeyword').value.trim();
+  const site = document.getElementById('scrapeSite').value;
+  const maxPrice = parseInt(document.getElementById('scrapeMaxPrice').value) || 500;
+  const statusEl = document.getElementById('scrapeStatus');
+  const runBtn = document.getElementById('runBtn');
+
+  if (!keyword) {
+    statusEl.textContent = 'Enter a keyword first.';
+    statusEl.className = 'scrape-status err';
+    return;
+  }
+
+  if (SCRAPE_API.includes('YOUR-APP')) {
+    statusEl.innerHTML = '<b>Setup needed:</b> Deploy the API to Render first, then paste the URL into index.html where it says SCRAPE_API. See instructions below.';
+    statusEl.className = 'scrape-status err';
+    return;
+  }
+
+  runBtn.disabled = true;
+  runBtn.textContent = 'Scraping…';
+  scrapeResults = [];
+  renderScrapeGrid();
+  statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Scraping <b>${esc(site)}</b> for "<b>${esc(keyword)}</b>" — takes ~30s on first run…`;
+  statusEl.className = 'scrape-status';
+
+  try {
+    const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
+    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    scrapeResults = data.items || [];
+    if (!scrapeResults.length) {
+      statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}" on ${site}. Try a broader keyword.`;
+      statusEl.className = 'scrape-status err';
+    } else {
+      statusEl.innerHTML = `<span class="live-tag">LIVE</span> Found <b>${scrapeResults.length}</b> results for "<b>${esc(keyword)}</b>" on ${esc(site)}`;
+      statusEl.className = 'scrape-status ok';
+    }
+    renderScrapeGrid();
+  } catch (e) {
+    statusEl.textContent = 'Scrape failed: ' + e.message;
+    statusEl.className = 'scrape-status err';
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = 'Scrape';
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 loadData();
 </script>
 </body>
