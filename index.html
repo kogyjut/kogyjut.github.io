@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -53,7 +53,70 @@ h1 { font-size:28px; margin:0 0 6px; letter-spacing:-0.01em; }
 .site a { font-size:12px; color:#0563c1; text-decoration:none; }
 .disclaimer { margin-top:24px; padding:12px 14px; background:#fff8e1; border:1px solid #ffe7a3; border-radius:8px; font-size:12.5px; color:#5b4500; }
 footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-size:12px; color:#888; text-align:center; }
+.loading { text-align:center; padding:60px 20px; color:#888; font-size:13px; }
+.loading-dot { display:inline-block; animation:pulse 1.2s ease-in-out infinite; }
+.loading-dot:nth-child(2) { animation-delay:.2s; }
+.loading-dot:nth-child(3) { animation-delay:.4s; }
+@keyframes pulse { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
 @media (max-width:600px) { h1 { font-size:22px; } .toolbar { flex-direction:column; align-items:stretch; } .stats { margin-left:0; text-align:center; } }
+
+/* ── Scrape Button ─────────────────────────────────────────────────────────── */
+.scrape-btn {
+  display:block; width:100%; margin:22px 0 0;
+  padding:26px 20px;
+  background:#111; color:#fff;
+  border:none; border-radius:14px;
+  font:700 22px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing:.05em; text-transform:uppercase;
+  cursor:pointer;
+  transition:background .12s ease, transform .12s ease, box-shadow .12s ease;
+  box-shadow:0 4px 20px rgba(0,0,0,.18);
+}
+.scrape-btn:hover { background:#000; transform:translateY(-2px); box-shadow:0 8px 28px rgba(0,0,0,.22); }
+.scrape-btn.open { background:#333; border-radius:14px 14px 0 0; transform:none; box-shadow:none; }
+
+/* ── Scrape Panel ──────────────────────────────────────────────────────────── */
+.scrape-panel {
+  background:#fff; border:1px solid #e5e5e5; border-top:none;
+  border-radius:0 0 14px 14px; padding:20px 20px 24px;
+  margin-bottom:22px;
+}
+.scrape-controls {
+  display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;
+  padding-bottom:16px; border-bottom:1px solid #f0f0f0; margin-bottom:16px;
+}
+.scrape-field { display:flex; flex-direction:column; gap:5px; }
+.scrape-field label { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:#888; font-weight:600; }
+.scrape-field input, .scrape-field select {
+  padding:9px 11px; border:1px solid #d4d4d4; border-radius:7px;
+  font:inherit; font-size:13px; background:#fff;
+  transition:border-color .1s;
+}
+.scrape-field input:focus, .scrape-field select:focus { outline:none; border-color:#111; }
+.scrape-field input[type=text] { width:260px; }
+.scrape-field input[type=number] { width:110px; }
+.scrape-field select { width:160px; }
+.scrape-filter-row { display:flex; gap:8px; flex-wrap:wrap; }
+.scrape-filter-row .chip { font-size:11.5px; }
+.run-btn {
+  padding:10px 28px; background:#111; color:#fff;
+  border:none; border-radius:7px; font:700 13px/1 inherit;
+  letter-spacing:.04em; text-transform:uppercase; cursor:pointer;
+  transition:background .1s, transform .1s;
+  align-self:flex-end;
+}
+.run-btn:hover { background:#000; transform:translateY(-1px); }
+.run-btn:disabled { background:#999; cursor:not-allowed; transform:none; }
+.scrape-status {
+  font-size:12.5px; color:#666; margin-bottom:14px; min-height:20px;
+}
+.scrape-status.err { color:#c0392b; }
+.scrape-status.ok { color:#2e7d32; }
+.live-tag {
+  display:inline-block; font-size:10px; padding:2px 7px; border-radius:999px;
+  background:#111; color:#fff; font-weight:700; letter-spacing:.05em;
+  margin-right:6px; vertical-align:middle;
+}
 </style>
 </head>
 <body>
@@ -61,19 +124,71 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <header>
 <div>
 <h1>AI Cloths Finder — Archive Picks</h1>
-<p class="sub">15 men's archive and designer pieces under 500 AUD across Buyee, Yahoo Auctions JP, Mercari JP, Grailed and Taobao agents. 10 authentic plus 5 reps.</p>
+<p class="sub">Live archive and designer finds under 500 AUD — auto-scraped from Grailed every 8 hours. Tap the button below to search any site live.</p>
 </div>
-<span class="lastup">Last updated: May 2026</span>
+<span class="lastup" id="lastupdated">Loading...</span>
 </header>
-<div class="toolbar">
-<input id="q" type="search" placeholder="Search brand, item, site...">
-<span class="chip active" data-filter="all">All</span>
-<span class="chip" data-filter="auth">Authentic</span>
-<span class="chip" data-filter="rep">Reps only</span>
-<span class="chip" data-filter="under250">Under 250 AUD</span>
-<span class="stats">Showing <b id="count">15</b> of 15</span>
+
+<!-- ── GIANT SCRAPE BUTTON ───────────────────────────────────────────────── -->
+<button class="scrape-btn" id="scrapeBtn" onclick="togglePanel()">
+  Search &amp; Scrape for Clothes
+</button>
+
+<!-- ── SCRAPE PANEL ──────────────────────────────────────────────────────── -->
+<div class="scrape-panel hide" id="scrapePanel">
+  <div class="scrape-controls">
+
+    <div class="scrape-field">
+      <label>Site</label>
+      <select id="scrapeSite">
+        <option value="grailed">Grailed</option>
+        <option value="depop">Depop</option>
+        <option value="ebay">eBay AU</option>
+      </select>
+    </div>
+
+    <div class="scrape-field">
+      <label>Keyword</label>
+      <input type="text" id="scrapeKeyword" placeholder="e.g. rick owens jacket" onkeydown="if(event.key==='Enter')runScrape()">
+    </div>
+
+    <div class="scrape-field">
+      <label>Max Price (AUD)</label>
+      <input type="number" id="scrapeMaxPrice" value="500" min="10" max="5000" step="10">
+    </div>
+
+    <button class="run-btn" id="runBtn" onclick="runScrape()">Scrape</button>
+  </div>
+
+  <div class="scrape-filter-row" style="margin-bottom:14px;">
+    <span style="font-size:11px;color:#888;align-self:center;margin-right:4px;">Filter results:</span>
+    <span class="chip active" data-sf="all" onclick="setSFilter(this)">All</span>
+    <span class="chip" data-sf="auth" onclick="setSFilter(this)">Authentic only</span>
+    <span class="chip" data-sf="under250" onclick="setSFilter(this)">Under 250 AUD</span>
+  </div>
+
+  <div class="scrape-status" id="scrapeStatus"></div>
+  <div class="grid" id="scrapeGrid"></div>
 </div>
-<div class="grid" id="grid"></div>
+
+<!-- ── SCHEDULED PICKS TOOLBAR ───────────────────────────────────────────── -->
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Search scheduled picks...">
+  <span class="chip active" data-filter="all">All</span>
+  <span class="chip" data-filter="auth">Authentic</span>
+  <span class="chip" data-filter="rep">Reps only</span>
+  <span class="chip" data-filter="under250">Under 250 AUD</span>
+  <span class="stats">Showing <b id="count">—</b> of <b id="total">—</b></span>
+</div>
+<div class="grid" id="grid">
+  <div class="loading">
+    <span class="loading-dot">•</span>
+    <span class="loading-dot">•</span>
+    <span class="loading-dot">•</span>
+    <br><br>Loading scheduled picks…
+  </div>
+</div>
+
 <div class="section-h">Where to keep looking</div>
 <div class="sites">
 <div class="site"><b>Buyee</b><p>Proxy for Yahoo Auctions JP, Mercari JP, ZOZO.</p><a href="https://buyee.jp" target="_blank">buyee.jp</a></div>
@@ -87,57 +202,185 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <div class="site"><b>DHGate</b><p>Direct rep marketplace.</p><a href="https://www.dhgate.com" target="_blank">dhgate.com</a></div>
 <div class="site"><b>r/RepArchive</b><p>Community QC photos.</p><a href="https://www.reddit.com/r/RepArchive/" target="_blank">reddit.com/r/RepArchive</a></div>
 </div>
-<div class="disclaimer"><b>Heads-up:</b> Archive marketplaces move fast. AUD prices exclude proxy fees and intl shipping. Sizing on JP archive runs small. Always ask sellers for measurements before bidding.</div>
-<footer><p>Personal archive shopping list. Hosted on GitHub Pages.</p></footer>
+<div class="disclaimer"><b>Heads-up:</b> Archive marketplaces move fast. AUD prices exclude proxy fees and intl shipping. Sizing on JP archive runs small. Always ask sellers for measurements before bidding. Listings are scraped live and may have sold.</div>
+<footer><p>Personal archive shopping list. Hosted on GitHub Pages. Powered by Scrapling.</p></footer>
 </div>
+
 <script>
-const items = [
-{n:1,brand:"Rick Owens DRKSHDW",item:"Trucker Jacket MIJ 16oz Black",desc:"Western-cut trucker in heavy 16oz Japanese black selvedge. DRKSHDW silhouette: long body, dropped shoulders, raw hem.",size:"S/M/L",origPrice:"USD 865",aud:1341,under:false,site:"Selfedge",url:"https://www.selfedge.com/index.php?route=product/product&product_id=3645",rep:"auth",notes:"RRP anchor. Used pieces under 400 AUD on Yahoo JP.",img:"https://images.selfedge.com/cache/catalog/20240920/Rick_Owens_DRKSHDW_Trucker_Jacket_Made_in_Japan_16oz_Black-001-680x1025.jpg"},
-{n:2,brand:"Rick Owens (live feed)",item:"Yahoo Auctions JP Rick Owens category",desc:"Buyee proxy link to Rick Owens auctions. Many MA-1s, ramones, jeans appear under 30000 yen.",size:"Filter on site",origPrice:"10k-40k yen",aud:258,under:false,site:"Buyee",url:"https://buyee.jp/item/search/query/rick+owens?lang=en",rep:"auth",notes:"Add 15 percent fee plus 30 AUD shipping.",img:"https://media-assets.grailed.com/prd/listing/18876998/7069ad30a09c403681dfec715ec08df0"},
-{n:3,brand:"If Six Was Nine",item:"Mudmax Flared Jeans",desc:"Cult Japanese archive jeans. Overwashed mud-tone denim, flared leg, safety-pin detailing.",size:"30 to 31",origPrice:"USD 250",aud:388,under:false,site:"Grailed",url:"https://www.grailed.com/designers/if-six-was-nine/browse/mudmax-denim",rep:"auth",notes:"Mudmax shape resurfaces weekly.",img:"https://media-assets.grailed.com/prd/listing/47415830/75d7db2b8ffa41699fc03d85d3df9473"},
-{n:4,brand:"L.G.B.",item:"00s SAHARA Parachute Cargo Pants",desc:"Early-2000s LGB Sahara cargo. Parachute nylon, drawstring waist, tapered cuff.",size:"Tagged 1",origPrice:"35000 yen",aud:361,under:false,site:"Grailed",url:"https://www.grailed.com/designers/le-grande-bleu-l-g-b/menswear/bottoms/cargo-pants",rep:"auth",notes:"Sister brand to i6w9.",img:"https://media-assets.grailed.com/prd/listing/9538571/863abacbf57f449a8c422325eb4959af"},
-{n:5,brand:"Yohji Yamamoto Pour Homme",item:"Wide Wool Gabardine Trousers",desc:"Yohji wide-leg drape. Black wool gabardine, side seam pockets, hidden zip fly.",size:"3=M, 4=L",origPrice:"15000 yen",aud:155,under:true,site:"Buyee Mercari JP",url:"https://buyee.jp/item/search/query/yohji+yamamoto+wide+trousers?lang=en",rep:"auth",notes:"Live search, refresh for new listings.",img:"https://media-assets.grailed.com/prd/listing/893421/db7de4f032c64a6a96b2c76532b1874b"},
-{n:6,brand:"Helmut Lang",item:"Bootcut Vintage Faded Jeans",desc:"Late-90s mainline Helmut bootcut. Italian-made, indigo with natural fade, long inseam.",size:"Tagged 33",origPrice:"USD 170",aud:264,under:false,site:"Grailed",url:"https://www.grailed.com/designers/helmut-lang/menswear/bottoms/bootcut-jeans",rep:"auth",notes:"Often under 200 USD.",img:"https://media-assets.grailed.com/prd/listing/21293888/ac0d195604e040eaad4810c7b2954549"},
-{n:7,brand:"Raf Simons",item:"Aether et Anima Archive Tee",desc:"Mainline Raf graphic tee from early-2000s Aether et Anima run. Oversized fit.",size:"Tagged 50",origPrice:"USD 259",aud:401,under:false,site:"Grailed",url:"https://www.grailed.com/listings/13087585-raf-simons-aether-et-anima-mmdcclix-archive-t-shirt",rep:"auth",notes:"Cheaper Raf graphic tees regularly under 200.",img:"https://media-assets.grailed.com/prd/listing/13087585/c2c139c33a304609b2e7eb75840f2145"},
-{n:8,brand:"Number (N)ine",item:"AW09 Formal Tailored Jacket",desc:"Final-era Number Nine tailored blazer. Black wool, narrow lapel, single vent.",size:"Tagged 2",origPrice:"USD 300",aud:465,under:false,site:"Grailed",url:"https://www.grailed.com/listings/26578467-number-n-ine-number-nine-aw09-formal-jacket",rep:"auth",notes:"Tees and shirts often under 200.",img:"https://media-assets.grailed.com/prd/listing/26578467/4f5b6edd1b424cf8bde5f89551462757"},
-{n:9,brand:"Undercover",item:"SS98 Archive Jacket",desc:"Early Undercover archive jacket. Pre-Scab era, cotton outer with cut-and-sew detail.",size:"M",origPrice:"USD 135",aud:209,under:true,site:"Grailed",url:"https://www.grailed.com/designers/undercover/browse/ss-98",rep:"auth",notes:"Browse Undercover archive on Grailed.",img:"https://media-assets.grailed.com/prd/listing/22249613/a280050a19d3450b9230f9d34448bc6b"},
-{n:10,brand:"Maison Margiela",item:"Replica GAT Sneakers",desc:"Margiela Replica GAT. Off-white suede plus canvas. Vintage pairs trade 150-250 USD used.",size:"EU 41-44",origPrice:"USD 200",aud:310,under:false,site:"Grailed",url:"https://www.grailed.com/browse/maison-margiela-gats",rep:"auth",notes:"Live search via designer page.",img:"https://media-assets.grailed.com/prd/listing/11080588/c7fbe224d3e549ec9a1bef174d545ea6"},
-{n:11,brand:"Rick Owens (REP)",item:"Geobasket High-Top 1:1 batch",desc:"1:1 Rick Owens Geobasket rep. Top batches use real-leather upper, sock-liner, correct stitch count.",size:"EU 39-46",origPrice:"USD 44",aud:68,under:true,site:"DHGate",url:"https://www.dhgate.com/w/rick+owens+geobasket/1.html",rep:"rep",notes:"Authentic retails 1300 plus. Add 50 AUD shipping.",img:"https://www.rickowens.eu/cdn/shop/files/RU01F2894_LGYCOX_13811_01.jpg?v=1769695216&width=800"},
-{n:12,brand:"Rick Owens DRKSHDW (REP)",item:"Wax-Coated Detroit Jeans",desc:"Rep of waxed black DRKSHDW jeans. High rise, slight taper, wax-finish denim.",size:"W28-W36",origPrice:"USD 48",aud:74,under:true,site:"DHGate",url:"https://www.dhgate.com/w/rick+owens+drkshdw+jeans/1.html",rep:"rep",notes:"Quality varies. Check r/RepArchive QC before buying.",img:"https://images.selfedge.com/cache/catalog/20190822/ro_detroit_waxed_33_01-680x1025.jpg"},
-{n:13,brand:"Maison Margiela (REP)",item:"Tabi Split-Toe Boots",desc:"Rep Margiela Tabi. Cleft cow-leather upper, stacked heel.",size:"EU 35-46",origPrice:"USD 39",aud:60,under:true,site:"DHGate",url:"https://www.dhgate.com/w/margiela+tabi+boots/1.html",rep:"rep",notes:"Authentic Tabis around 1500.",img:"https://media-assets.grailed.com/prd/listing/12799862/19d4460e229744699d085ba349dbeb7d"},
-{n:14,brand:"MA+ / Guidi style (REP)",item:"Horse-Leather Side-Zip Boots",desc:"Rep of cult MA+ Guidi PL1 silhouette. Full-length side zip, horse-leather upper.",size:"EU 39-45",origPrice:"USD 82",aud:127,under:true,site:"DHGate",url:"https://www.dhgate.com/w/horse+leather+side+zip+boots/1.html",rep:"rep",notes:"Authentic MA+ 2000 plus. Watch upper crease photos in QC.",img:"https://images.garmentory.com/images/11589384/xl/796LVX-Horse-Leather-Side-Zip-Boot-in-Black-20241025190127.jpg"},
-{n:15,brand:"Number (N)ine (REP)",item:"Bondage Strap Slim Trousers",desc:"Rep of late-2000s N(n) bondage pant. Black wool blend, removable bondage strap.",size:"W28-W34",origPrice:"USD 36",aud:56,under:true,site:"DHGate",url:"https://www.dhgate.com/w/bondage+strap+pants/1.html",rep:"rep",notes:"Authentic archive N(n) bondage pants 400 plus when they appear.",img:"https://media-assets.grailed.com/prd/listing/975637/eed85c922a53450d875e02e75f69c3f6"}
-];
-const grid=document.getElementById('grid');
-const countEl=document.getElementById('count');
-const qInput=document.getElementById('q');
-let activeFilter='all';
-function esc(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function render(){
-  const q=qInput.value.trim().toLowerCase();
-  let v=0;
-  let html='';
-  for(const it of items){
-    const mq=!q||(it.brand+' '+it.item+' '+it.desc+' '+it.site+' '+it.notes).toLowerCase().includes(q);
-    const mf=activeFilter==='all'||(activeFilter==='auth'&&it.rep==='auth')||(activeFilter==='rep'&&it.rep==='rep')||(activeFilter==='under250'&&it.under);
-    const sh=mq&&mf;
-    if(sh)v++;
-    const tagH=it.rep==='rep'?'<span class="tag rep">REP</span>':'<span class="tag auth">AUTHENTIC</span>';
-    const undH=it.under?'<span class="tag under">under 250 AUD</span>':'';
-    const imgH=it.img?'<img src="'+esc(it.img)+'" alt="'+esc(it.item)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"><span class="no-img" style="display:none">No image</span>':'<span class="no-img">No image</span>';
-    html+='<div class="card'+(sh?'':' hide')+'"><div class="img">'+imgH+'</div><div class="body"><div class="brand">'+esc(it.brand)+' #'+it.n+'</div><div class="title">'+esc(it.item)+'</div><div class="desc">'+esc(it.desc)+'</div><div>'+tagH+undH+'</div><dl class="meta"><dt>Size</dt><dd>'+esc(it.size)+'</dd><dt>Price</dt><dd><span class="price">'+it.aud+'</span> <span class="aud">AUD - '+esc(it.origPrice)+'</span></dd><dt>Site</dt><dd>'+esc(it.site)+'</dd></dl><div class="notes">'+esc(it.notes)+'</div><a class="btn" href="'+esc(it.url)+'" target="_blank" rel="noopener">View listing</a></div></div>';
-  }
-  grid.innerHTML=html;
-  countEl.textContent=v;
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATE THIS after deploying the API to Render:
+//   https://dashboard.render.com → New Web Service → connect your repo
+//   then paste the URL it gives you below (no trailing slash)
+// ─────────────────────────────────────────────────────────────────────────────
+const SCRAPE_API = 'http://localhost:8001';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
-  document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
+
+function cardHTML(it) {
+  const tagH = it.rep === 'rep'
+    ? '<span class="tag rep">REP</span>'
+    : '<span class="tag auth">AUTHENTIC</span>';
+  const undH = it.under ? '<span class="tag under">under 250 AUD</span>' : '';
+  const imgSrc = it.image || it.img || '';
+  const imgH = imgSrc
+    ? `<img src="${esc(imgSrc)}" alt="${esc(it.item)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="no-img" style="display:none">No image</span>`
+    : '<span class="no-img">No image</span>';
+  return `<div class="card">
+    <div class="img">${imgH}</div>
+    <div class="body">
+      <div class="brand">${esc(it.brand)}${it.n ? ' #' + it.n : ''}</div>
+      <div class="title">${esc(it.item)}</div>
+      ${it.desc ? `<div class="desc">${esc(it.desc)}</div>` : ''}
+      <div>${tagH}${undH}</div>
+      <dl class="meta">
+        <dt>Size</dt><dd>${esc(it.size)}</dd>
+        <dt>Price</dt><dd><span class="price">$${it.aud}</span> <span class="aud">AUD &mdash; ${esc(it.origPrice)}</span></dd>
+        <dt>Site</dt><dd>${esc(it.site)}</dd>
+      </dl>
+      ${it.notes ? `<div class="notes">${esc(it.notes)}</div>` : ''}
+      <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">View listing</a>
+    </div>
+  </div>`;
+}
+
+// ── Scheduled picks (data.json) ───────────────────────────────────────────────
+let items = [];
+let activeFilter = 'all';
+
+function render() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const grid = document.getElementById('grid');
+  const countEl = document.getElementById('count');
+  const totalEl = document.getElementById('total');
+  if (!items.length) {
+    grid.innerHTML = '<div class="loading">No listings loaded yet — run the GitHub Action to populate.</div>';
+    countEl.textContent = '0'; totalEl.textContent = '0';
+    return;
+  }
+  let v = 0, html = '';
+  for (const it of items) {
+    const mq = !q || (it.brand+' '+it.item+' '+(it.desc||'')+' '+it.site+' '+(it.notes||'')).toLowerCase().includes(q);
+    const mf = activeFilter==='all'
+      ||(activeFilter==='auth'&&it.rep==='auth')
+      ||(activeFilter==='rep'&&it.rep==='rep')
+      ||(activeFilter==='under250'&&it.under);
+    if (mq&&mf) v++;
+    html += `<div class="${mq&&mf?'':'hide'}">${cardHTML(it)}</div>`;
+  }
+  grid.innerHTML = html || '<div class="loading">No results match your filters.</div>';
+  countEl.textContent = v; totalEl.textContent = items.length;
+}
+
+async function loadData() {
+  try {
+    const resp = await fetch('data.json?t=' + Date.now());
+    if (!resp.ok) throw new Error('missing');
+    const data = await resp.json();
+    items = data.items || [];
+    document.getElementById('lastupdated').textContent = 'Last updated: ' + (data.last_updated || '—');
+    render();
+  } catch {
+    document.getElementById('lastupdated').textContent = 'Not yet scraped';
+    document.getElementById('grid').innerHTML = '<div class="loading">Run the GitHub Action first to load scheduled picks.</div>';
+  }
+}
+
+document.querySelectorAll('.toolbar .chip').forEach(c => c.addEventListener('click', () => {
+  document.querySelectorAll('.toolbar .chip').forEach(x => x.classList.remove('active'));
   c.classList.add('active');
-  activeFilter=c.dataset.filter;
+  activeFilter = c.dataset.filter;
   render();
 }));
-qInput.addEventListener('input',render);
-render();
+document.getElementById('q').addEventListener('input', render);
+
+// ── Scrape Panel ──────────────────────────────────────────────────────────────
+let scrapeFilter = 'all';
+let scrapeResults = [];
+
+function togglePanel() {
+  const btn = document.getElementById('scrapeBtn');
+  const panel = document.getElementById('scrapePanel');
+  const open = !panel.classList.contains('hide');
+  panel.classList.toggle('hide', open);
+  btn.classList.toggle('open', !open);
+  if (!open) document.getElementById('scrapeKeyword').focus();
+}
+
+function setSFilter(el) {
+  document.querySelectorAll('.scrape-filter-row .chip').forEach(x => x.classList.remove('active'));
+  el.classList.add('active');
+  scrapeFilter = el.dataset.sf;
+  renderScrapeGrid();
+}
+
+function renderScrapeGrid() {
+  const grid = document.getElementById('scrapeGrid');
+  if (!scrapeResults.length) { grid.innerHTML = ''; return; }
+  const filtered = scrapeResults.filter(it =>
+    scrapeFilter === 'all' ||
+    (scrapeFilter === 'auth' && it.rep === 'auth') ||
+    (scrapeFilter === 'under250' && it.under)
+  );
+  grid.innerHTML = filtered.length
+    ? filtered.map(cardHTML).join('')
+    : '<div class="loading" style="padding:30px">No results match that filter.</div>';
+}
+
+async function runScrape() {
+  const keyword = document.getElementById('scrapeKeyword').value.trim();
+  const site = document.getElementById('scrapeSite').value;
+  const maxPrice = parseInt(document.getElementById('scrapeMaxPrice').value) || 500;
+  const statusEl = document.getElementById('scrapeStatus');
+  const runBtn = document.getElementById('runBtn');
+
+  if (!keyword) {
+    statusEl.textContent = 'Enter a keyword first.';
+    statusEl.className = 'scrape-status err';
+    return;
+  }
+
+  if (SCRAPE_API.includes('localhost')) {
+    statusEl.innerHTML = '<b>Setup needed:</b> Deploy the API to Render first, then paste the URL into index.html where it says SCRAPE_API.';
+    statusEl.className = 'scrape-status err';
+    return;
+  }
+
+  runBtn.disabled = true;
+  runBtn.textContent = 'Scraping…';
+  scrapeResults = [];
+  renderScrapeGrid();
+  statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Scraping <b>${esc(site)}</b> for "<b>${esc(keyword)}</b>" — takes ~30s on first run…`;
+  statusEl.className = 'scrape-status';
+
+  try {
+    const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
+    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    scrapeResults = data.items || [];
+    if (!scrapeResults.length) {
+      statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}" on ${site}. Try a broader keyword.`;
+      statusEl.className = 'scrape-status err';
+    } else {
+      statusEl.innerHTML = `<span class="live-tag">LIVE</span> Found <b>${scrapeResults.length}</b> results for "<b>${esc(keyword)}</b>" on ${esc(site)}`;
+      statusEl.className = 'scrape-status ok';
+    }
+    renderScrapeGrid();
+  } catch (e) {
+    statusEl.textContent = 'Scrape failed: ' + e.message;
+    statusEl.className = 'scrape-status err';
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = 'Scrape';
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadData();
 </script>
 </body>
 </html>
