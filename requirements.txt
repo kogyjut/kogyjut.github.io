@@ -1,4 +1,3 @@
-scrapling[camoufox]
-camoufox
+playwright
 fastapi
 uvicorn
