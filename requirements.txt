@@ -1,3 +1,5 @@
-playwright
 fastapi
-uvicorn
+uvicorn[standard]
+requests
+scrapling
+camoufox[geoip]
