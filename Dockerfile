@@ -2,11 +2,8 @@ FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 WORKDIR /app
 
-# Use the browsers pre-installed in this image; skip re-download during pip install
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
 COPY requirements.txt .
+# playwright + Chromium are pre-installed in the base image; only add the API deps
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api.py .
