@@ -1,3 +1,4 @@
 scrapling[camoufox]
+camoufox
 fastapi
 uvicorn
