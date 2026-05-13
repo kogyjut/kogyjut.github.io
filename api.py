@@ -1,11 +1,14 @@
 import json
 import re
+import uuid
 import asyncio
 import urllib.parse
+from datetime import datetime
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from scrapling.fetchers import StealthyFetcher
 
@@ -13,9 +16,22 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+WALL_FILE = Path("wall.json")
+
+def _load_wall():
+    if WALL_FILE.exists():
+        try:
+            return json.loads(WALL_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"posts": []}
+
+def _save_wall(data):
+    WALL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 executor = ThreadPoolExecutor(max_workers=4)
 USD_TO_AUD = 1.55
@@ -35,9 +51,15 @@ session.headers.update(HEADERS)
 
 
 def stealth_get(url: str) -> str:
-    """Fetch a JS-rendered page bypassing anti-bot."""
+    """Fetch a JS-rendered page bypassing anti-bot, return HTML string."""
     page = StealthyFetcher.fetch(url, headless=True, network_idle=True, timeout=45000)
-    return page.body if hasattr(page, "body") else str(page)
+    body = page.body if hasattr(page, "body") else b""
+    return body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
+
+
+def stealth_page(url: str):
+    """Fetch and return the Scrapling page object (has .css() selector support)."""
+    return StealthyFetcher.fetch(url, headless=True, network_idle=True, timeout=45000)
 
 
 # ── Grailed via Algolia ────────────────────────────────────────────────────────
@@ -46,71 +68,74 @@ GRAILED_APP_ID = "MNRWEFSS2Q"
 GRAILED_INDEX = "grailed_all"
 
 
-def _get_grailed_key() -> str:
-    try:
-        r = session.get("https://www.grailed.com", timeout=12)
-        for pat in [
-            r'"searchKey"\s*:\s*"([a-f0-9]{32})"',
-            r'"apiKey"\s*:\s*"([a-f0-9]{32})"',
-            r'ALGOLIA[^"]*"\s*,\s*"([a-f0-9]{32})"',
-        ]:
-            m = re.search(pat, r.text)
-            if m:
-                return m.group(1)
-    except Exception as e:
-        print(f"Key fetch error: {e}")
-    return ""
-
-
 def scrape_grailed(keyword: str, max_usd: float) -> list:
-    api_key = _get_grailed_key()
-
-    # Try Algolia API if we got a key
-    if api_key:
-        try:
-            url = f"https://{GRAILED_APP_ID}-dsn.algolia.net/1/indexes/{GRAILED_INDEX}/query"
-            payload = {
-                "query": keyword,
-                "hitsPerPage": 20,
-                "numericFilters": [f"price_i<={int(max_usd)}"],
-            }
-            r = session.post(
-                url,
-                json=payload,
-                headers={
-                    **HEADERS,
-                    "X-Algolia-Application-Id": GRAILED_APP_ID,
-                    "X-Algolia-API-Key": api_key,
-                },
-                timeout=12,
-            )
-            hits = r.json().get("hits", [])
-            if hits:
-                return _parse_hits(hits, max_usd)
-        except Exception as e:
-            print(f"Algolia error: {e}")
-
-    # Fallback — try __NEXT_DATA__ in HTML
+    slug = urllib.parse.quote_plus(keyword)
     try:
-        slug = urllib.parse.quote_plus(keyword)
-        r = session.get(
-            f"https://www.grailed.com/shop/listings?query={slug}",
-            timeout=12,
-        )
-        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
-        if m:
-            listings = (
-                json.loads(m.group(1))
-                .get("props", {})
-                .get("pageProps", {})
-                .get("listings", [])
-            )
-            if listings:
-                return _parse_hits(listings, max_usd)
+        page = stealth_page(f"https://www.grailed.com/shop?query={slug}")
     except Exception as e:
-        print(f"Grailed HTML fallback error: {e}")
+        print(f"Grailed stealth fetch error: {e}")
+        return []
 
-    return []
+    listing_links = page.css('a[href*="/listings/"]')
+    if not listing_links:
+        return []
+
+    out = []
+    for a in listing_links:
+        try:
+            href = a.attrib.get("href", "")
+            id_match = re.search(r'/listings/(\d+)', href)
+            if not id_match:
+                continue
+            lid = id_match.group(1)
+
+            slug_match = re.search(r'/listings/\d+-(.+?)(?:\?|$)', href)
+            title = slug_match.group(1).replace("-", " ").title() if slug_match else keyword.title()
+
+            # Walk up to the card container that has a price span
+            node = a
+            price_usd = 0.0
+            img_url = ""
+            for _ in range(8):
+                if node is None:
+                    break
+                price_spans = [
+                    s.text for s in (node.css("span") if hasattr(node, "css") else [])
+                    if s.text and "$" in s.text and len(s.text) < 20
+                ]
+                if price_spans:
+                    pm = re.search(r'[\d,]+(?:\.\d+)?', price_spans[0].replace(",", ""))
+                    price_usd = float(pm.group()) if pm else 0.0
+                    imgs = node.css("img")
+                    if imgs:
+                        # Use srcset for best quality; strip trailing ? and append width
+                        raw = imgs[0].attrib.get("src", "").rstrip("?")
+                        img_url = raw + "?w=640" if raw and "?" not in raw else raw
+                    break
+                node = node.parent if hasattr(node, "parent") else None
+
+            if not price_usd or price_usd > max_usd:
+                continue
+
+            aud = round(price_usd * USD_TO_AUD)
+            out.append({
+                "brand": keyword.title(),
+                "item": title,
+                "desc": "",
+                "size": "Check listing",
+                "origPrice": f"USD {price_usd:.0f}",
+                "aud": aud,
+                "under": aud < 250,
+                "site": "Grailed",
+                "url": f"https://www.grailed.com/listings/{lid}",
+                "rep": "auth",
+                "notes": "Live Grailed listing",
+                "image": img_url,
+            })
+        except Exception:
+            continue
+
+    return out[:12]
 
 
 def _parse_hits(hits: list, max_usd: float) -> list:
@@ -150,95 +175,151 @@ def scrape_depop(keyword: str, max_usd: float) -> list:
     max_aud = round(max_usd * USD_TO_AUD)
     q = urllib.parse.quote_plus(keyword)
     try:
-        html = stealth_get(f"https://www.depop.com/search/?q={q}")
-        # Extract JSON from Next.js data
-        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
-        if not m:
-            return []
-        data = json.loads(m.group(1))
-        products = (
-            data.get("props", {})
-            .get("pageProps", {})
-            .get("searchState", {})
-            .get("products", {})
-            .get("hits", [])
-        )
-        out = []
-        for p in products:
-            try:
-                price_aud = float(str(p.get("price", {}).get("nationalPrice", {}).get("amountRounded", 0)))
-                if price_aud > max_aud:
-                    continue
-                pics = p.get("pictures") or []
-                slug = p.get("slug", "")
-                out.append({
-                    "brand": p.get("brandName") or "",
-                    "item": (p.get("description") or "")[:60].strip(),
-                    "desc": (p.get("description") or "")[:140].strip(),
-                    "size": (p.get("sizes") or ["Check listing"])[0],
-                    "origPrice": f"AUD {price_aud:.0f}",
-                    "aud": round(price_aud),
-                    "under": price_aud < 250,
-                    "site": "Depop",
-                    "url": f"https://www.depop.com/products/{slug}/",
-                    "rep": "auth",
-                    "notes": "Live Depop listing",
-                    "image": pics[0].get("url", "") if pics else "",
-                })
-            except Exception:
-                continue
-        return out[:12]
+        page = stealth_page(f"https://www.depop.com/search/?q={q}")
     except Exception as e:
-        print(f"Depop error: {e}")
+        print(f"Depop fetch error: {e}")
         return []
 
+    product_links = page.css('a[href*="/products/"]')
+    if not product_links:
+        return []
 
-# ── eBay AU ────────────────────────────────────────────────────────────────────
+    out = []
+    seen = set()
+    for a in product_links:
+        try:
+            href = a.attrib.get("href", "")
+            if not href or href in seen:
+                continue
+            seen.add(href)
 
-def scrape_ebay(keyword: str, max_usd: float) -> list:
+            slug = href.strip("/").split("/")[-1]
+            # Slug format: username-product-name-HEXID — strip username and trailing hex ID
+            parts = slug.split("-")
+            # Drop first segment (username) and last segment if it looks like a hex ID
+            inner = parts[1:] if len(parts) > 1 else parts
+            if inner and re.fullmatch(r'[0-9a-fA-F]{4,}', inner[-1]):
+                inner = inner[:-1]
+            title = " ".join(inner).title() if inner else keyword.title()
+
+            # Walk up to card container with price
+            node = a
+            price_aud = 0.0
+            img_url = ""
+            for _ in range(8):
+                if node is None:
+                    break
+                price_els = [
+                    s.text for s in (node.css("p,span") if hasattr(node, "css") else [])
+                    if s.text and "$" in s.text and len(s.text) < 15
+                ]
+                if price_els:
+                    pm = re.search(r'[\d.]+', price_els[0].replace(",", ""))
+                    price_aud = float(pm.group()) if pm else 0.0
+                    imgs = node.css("img")
+                    if imgs:
+                        # Prefer _mainImage over _blurImage placeholder
+                        main = next((i for i in imgs if "_mainImage" in (i.attrib.get("class") or "")), imgs[0])
+                        img_url = main.attrib.get("src", "")
+                    break
+                node = node.parent if hasattr(node, "parent") else None
+
+            if not price_aud or price_aud > max_aud:
+                continue
+
+            out.append({
+                "brand": "",
+                "item": title,
+                "desc": "",
+                "size": "Check listing",
+                "origPrice": f"AUD {price_aud:.0f}",
+                "aud": round(price_aud),
+                "under": price_aud < 250,
+                "site": "Depop",
+                "url": f"https://www.depop.com{href}",
+                "rep": "auth",
+                "notes": "Live Depop listing",
+                "image": img_url,
+            })
+        except Exception:
+            continue
+
+    return out[:12]
+
+
+# ── Vinted AU ──────────────────────────────────────────────────────────────────
+
+def scrape_vinted(keyword: str, max_usd: float) -> list:
     max_aud = round(max_usd * USD_TO_AUD)
     q = urllib.parse.quote_plus(keyword)
     try:
-        html = stealth_get(
-            f"https://www.ebay.com.au/sch/i.html"
-            f"?_nkw={q}&_sacat=11450&LH_BIN=1&_udhi={max_aud}&_sop=12"
-        )
-        out = []
-        for raw in re.findall(r'<li[^>]+s-item[^>]+>(.*?)</li>', html, re.S)[:16]:
-            try:
-                t = re.search(r'<span[^>]+SECONDARY_INFO[^>]*>(.*?)</span>|<h3[^>]*class="s-item__title"[^>]*>(.*?)</h3>', raw, re.S)
-                title = re.sub(r'<[^>]+>', '', (t.group(1) or t.group(2) or "")).strip() if t else ""
-                pm = re.search(r'\$([0-9,]+(?:\.[0-9]+)?)', raw)
-                price_aud = float(pm.group(1).replace(",", "")) if pm else 0
-                if not title or price_aud > max_aud or "Shop on eBay" in title:
-                    continue
-                lm = re.search(r'href="(https://www\.ebay\.com\.au/itm/[^"?]+)', raw)
-                im = re.search(r'<img[^>]+src="([^"]+)"', raw)
-                out.append({
-                    "brand": "",
-                    "item": title,
-                    "desc": "",
-                    "size": "Check listing",
-                    "origPrice": f"AUD {price_aud:.0f}",
-                    "aud": round(price_aud),
-                    "under": price_aud < 250,
-                    "site": "eBay AU",
-                    "url": lm.group(1) if lm else "https://www.ebay.com.au",
-                    "rep": "auth",
-                    "notes": "Live eBay AU listing",
-                    "image": im.group(1) if im else "",
-                })
-            except Exception:
-                continue
-        return out[:12]
+        page = stealth_page(f"https://www.vinted.com.au/catalog?search_text={q}")
     except Exception as e:
-        print(f"eBay error: {e}")
+        print(f"Vinted fetch error: {e}")
         return []
+
+    product_links = page.css('a[href*="/items/"]')
+    if not product_links:
+        return []
+
+    out = []
+    seen = set()
+    for a in product_links:
+        try:
+            href = a.attrib.get("href", "")
+            if not href or href in seen:
+                continue
+            seen.add(href)
+
+            node = a
+            price_aud = 0.0
+            img_url = ""
+            title = ""
+            for _ in range(8):
+                if node is None:
+                    break
+                price_els = [
+                    s.text for s in (node.css("p,span") if hasattr(node, "css") else [])
+                    if s.text and "$" in s.text and len(s.text) < 15
+                ]
+                if price_els:
+                    pm = re.search(r'[\d.]+', price_els[0].replace(",", ""))
+                    price_aud = float(pm.group()) if pm else 0.0
+                    imgs = node.css("img")
+                    if imgs:
+                        img_url = imgs[0].attrib.get("src", "")
+                    title_els = [s.text for s in node.css("p,span,h3")
+                                 if s.text and "$" not in s.text and len(s.text) > 3 and len(s.text) < 80]
+                    title = title_els[0] if title_els else keyword.title()
+                    break
+                node = node.parent if hasattr(node, "parent") else None
+
+            if not price_aud or price_aud > max_aud:
+                continue
+
+            out.append({
+                "brand": "",
+                "item": title or keyword.title(),
+                "desc": "",
+                "size": "Check listing",
+                "origPrice": f"AUD {price_aud:.0f}",
+                "aud": round(price_aud),
+                "under": price_aud < 250,
+                "site": "Vinted",
+                "url": f"https://www.vinted.com.au{href}" if href.startswith("/") else href,
+                "rep": "auth",
+                "notes": "Live Vinted listing",
+                "image": img_url,
+            })
+        except Exception:
+            continue
+
+    return out[:12]
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
-SCRAPERS = {"grailed": scrape_grailed, "depop": scrape_depop, "ebay": scrape_ebay}
+SCRAPERS = {"grailed": scrape_grailed, "depop": scrape_depop, "vinted": scrape_vinted}
 
 
 def _run(site: str, keyword: str, max_usd: float) -> list:
@@ -261,6 +342,44 @@ async def scrape(keyword: str = "", site: str = "grailed", max_price: int = 500)
     except Exception as e:
         return {"items": [], "count": 0, "error": str(e)}
 
+
+@app.get("/posts")
+def get_posts():
+    return _load_wall()
+
+@app.post("/post")
+def add_post(item: dict = Body(...)):
+    wall = _load_wall()
+    post = {
+        "id": uuid.uuid4().hex[:8],
+        "posted_at": datetime.now().isoformat(),
+        "item": item,
+        "comments": [],
+    }
+    wall["posts"].insert(0, post)
+    wall["posts"] = wall["posts"][:100]
+    _save_wall(wall)
+    return {"ok": True, "post": post}
+
+@app.post("/comment")
+def add_comment(body: dict = Body(...)):
+    post_id = body.get("post_id", "")
+    text = (body.get("text") or "").strip()[:280]
+    name = (body.get("name") or "Bro").strip()[:32] or "Bro"
+    if not post_id or not text:
+        return {"ok": False, "error": "missing fields"}
+    wall = _load_wall()
+    for post in wall["posts"]:
+        if post["id"] == post_id:
+            post["comments"].append({
+                "id": uuid.uuid4().hex[:8],
+                "name": name,
+                "text": text,
+                "posted_at": datetime.now().isoformat(),
+            })
+            _save_wall(wall)
+            return {"ok": True}
+    return {"ok": False, "error": "post not found"}
 
 @app.get("/health")
 def health():
