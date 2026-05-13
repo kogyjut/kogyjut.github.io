@@ -115,6 +115,45 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   background:#111; color:#fff; font-weight:700; letter-spacing:.05em;
   margin-right:6px; vertical-align:middle;
 }
+
+/* ── Bro Button ────────────────────────────────────────────────────────────── */
+.bro-btn {
+  display:block; width:100%; padding:9px 10px; margin-top:6px;
+  border:2px solid #111; border-radius:6px; background:#fff; color:#111;
+  text-align:center; font:700 11.5px/1 inherit; letter-spacing:.05em;
+  text-transform:uppercase; cursor:pointer; transition:all .1s;
+}
+.bro-btn:hover { background:#111; color:#fff; }
+.bro-btn:disabled { background:#f0f0f0; border-color:#d4d4d4; color:#aaa; cursor:default; }
+
+/* ── The Wall ──────────────────────────────────────────────────────────────── */
+.wall-feed { display:flex; flex-direction:column; gap:16px; margin-bottom:32px; }
+.wall-post { background:#fff; border:1px solid #e5e5e5; border-radius:14px; overflow:hidden; }
+.wall-post-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px 10px; }
+.wall-posted-by { font-size:12px; font-weight:600; }
+.wall-time { font-size:11px; color:#999; }
+.wall-site-tag { font-size:10px; font-weight:700; letter-spacing:.05em; background:#111; color:#fff; padding:2px 8px; border-radius:999px; }
+.wall-body { display:flex; gap:0; }
+.wall-thumb { width:160px; min-width:160px; background:#f0f0f0; }
+.wall-thumb img { width:160px; height:160px; object-fit:cover; display:block; }
+.wall-thumb .no-img { width:160px; height:160px; display:flex; align-items:center; justify-content:center; font-size:11px; color:#bbb; }
+.wall-info { padding:14px 16px; flex:1; display:flex; flex-direction:column; gap:6px; }
+.wall-item-title { font-weight:600; font-size:14px; line-height:1.35; }
+.wall-item-price { font-size:22px; font-weight:700; }
+.wall-item-site { font-size:11px; color:#888; }
+.wall-comments { border-top:1px solid #f0f0f0; }
+.wall-comment { display:flex; gap:10px; align-items:baseline; padding:8px 16px; border-bottom:1px solid #f8f8f8; font-size:13px; }
+.wall-comment-name { font-weight:600; color:#111; white-space:nowrap; font-size:12px; }
+.wall-comment-text { color:#444; flex:1; }
+.wall-comment-time { font-size:10px; color:#bbb; white-space:nowrap; }
+.wall-no-comments { padding:10px 16px; font-size:12px; color:#bbb; font-style:italic; }
+.wall-comment-form { display:flex; gap:8px; padding:10px 16px; background:#fafafa; border-top:1px solid #f0f0f0; }
+.wall-comment-name-input { width:90px; padding:7px 9px; border:1px solid #d4d4d4; border-radius:6px; font:12px/1 inherit; color:#555; }
+.wall-comment-text-input { flex:1; padding:7px 9px; border:1px solid #d4d4d4; border-radius:6px; font:13px/1 inherit; }
+.wall-comment-name-input:focus, .wall-comment-text-input:focus { outline:none; border-color:#111; }
+.wall-post-btn { padding:7px 14px; background:#111; color:#fff; border:none; border-radius:6px; font:700 12px/1 inherit; cursor:pointer; white-space:nowrap; }
+.wall-post-btn:hover { background:#000; }
+@media (max-width:600px) { .wall-thumb { width:110px; min-width:110px; } .wall-thumb img,.wall-thumb .no-img { width:110px; height:110px; } }
 </style>
 </head>
 <body>
@@ -141,7 +180,7 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
       <select id="scrapeSite">
         <option value="grailed">Grailed</option>
         <option value="depop">Depop</option>
-        <option value="ebay">eBay AU</option>
+        <option value="vinted">Vinted</option>
       </select>
     </div>
 
@@ -168,6 +207,10 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   <div class="scrape-status" id="scrapeStatus"></div>
   <div class="grid" id="scrapeGrid"></div>
 </div>
+
+<!-- ── THE WALL ────────────────────────────────────────────────────────────── -->
+<div class="section-h" id="wallHeading" style="display:none">The Wall — Bro Finds</div>
+<div id="wall" class="wall-feed"></div>
 
 <!-- ── SCHEDULED PICKS TOOLBAR ───────────────────────────────────────────── -->
 <div class="toolbar">
@@ -205,19 +248,283 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 </div>
 
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// UPDATE THIS after deploying the API to Render:
-//   https://dashboard.render.com → New Web Service → connect your repo
-//   then paste the URL it gives you below (no trailing slash)
-// ─────────────────────────────────────────────────────────────────────────────
-const SCRAPE_API = 'http://localhost:8001';
+// ── Client-side scraping via CORS proxy (no backend needed) ──────────────────
+const USD_TO_AUD = 1.55;
+const GRAILED_APP_ID = 'MNRWEFSS2Q';
+
+const PROXIES = [
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+];
+
+async function proxyFetch(url) {
+  let lastErr;
+  for (const make of PROXIES) {
+    try {
+      const resp = await fetch(make(url), { signal: AbortSignal.timeout(20000) });
+      if (resp.ok) return resp.text();
+      lastErr = new Error(`HTTP ${resp.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('All proxies failed — try again in a moment');
+}
+
+async function getGrailedKey() {
+  try {
+    const html = await proxyFetch('https://www.grailed.com');
+    for (const pat of [/"searchKey"\s*:\s*"([a-f0-9]{32})"/, /"apiKey"\s*:\s*"([a-f0-9]{32})"/]) {
+      const m = html.match(pat);
+      if (m) return m[1];
+    }
+  } catch {}
+  return null;
+}
+
+function parseGrailedHits(hits, maxUSD) {
+  const out = [];
+  for (const h of hits) {
+    try {
+      const price = parseFloat(h.price_i ?? h.price ?? 0);
+      if (price > maxUSD) continue;
+      const aud = Math.round(price * USD_TO_AUD);
+      const photo = h.cover_photo || {};
+      const designers = h.designers || [{}];
+      out.push({
+        brand: designers[0]?.name || '',
+        item: (h.title || '').trim(),
+        desc: (h.description || '').slice(0, 140).trim(),
+        size: h.size || 'Check listing',
+        origPrice: `USD ${price.toFixed(0)}`,
+        aud, under: aud < 250,
+        site: 'Grailed',
+        url: `https://www.grailed.com/listings/${h.id || h.objectID || ''}`,
+        rep: 'auth',
+        notes: 'Live Grailed listing',
+        image: photo.url || photo.thumb || '',
+      });
+    } catch {}
+  }
+  return out.slice(0, 12);
+}
+
+async function scrapeGrailed(keyword, maxPriceAUD) {
+  const maxUSD = Math.round(maxPriceAUD / USD_TO_AUD);
+
+  // Try Algolia API first (direct, no proxy needed — Algolia has CORS)
+  const key = await getGrailedKey();
+  if (key) {
+    try {
+      const r = await fetch(
+        `https://${GRAILED_APP_ID}-dsn.algolia.net/1/indexes/grailed_all/query`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Algolia-Application-Id': GRAILED_APP_ID,
+            'X-Algolia-API-Key': key,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ query: keyword, hitsPerPage: 20, numericFilters: [`price_i<=${maxUSD}`] }),
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      const data = await r.json();
+      if (data.hits?.length) return parseGrailedHits(data.hits, maxUSD);
+    } catch {}
+  }
+
+  // HTML fallback — parse __NEXT_DATA__ from Grailed search page
+  const html = await proxyFetch(`https://www.grailed.com/shop/listings?query=${encodeURIComponent(keyword)}`);
+  const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) throw new Error('Grailed page parse failed — Grailed may be blocking the proxy. Try again in a moment.');
+  const data = JSON.parse(m[1]);
+  const listings = data?.props?.pageProps?.listings || [];
+  if (!listings.length) return [];
+  return parseGrailedHits(listings, maxUSD);
+}
+
+async function scrapeEbay(keyword, maxPriceAUD) {
+  const q = encodeURIComponent(keyword);
+  const html = await proxyFetch(
+    `https://www.ebay.com.au/sch/i.html?_nkw=${q}&_sacat=11450&LH_BIN=1&_udhi=${maxPriceAUD}&_sop=12`
+  );
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const out = [];
+  for (const el of doc.querySelectorAll('.s-item')) {
+    try {
+      const title = el.querySelector('.s-item__title')?.textContent?.trim() || '';
+      if (!title || title === 'Shop on eBay') continue;
+      const priceText = el.querySelector('.s-item__price')?.textContent || '';
+      const pm = priceText.match(/\$([0-9,]+(?:\.[0-9]+)?)/);
+      const price = pm ? parseFloat(pm[1].replace(',', '')) : 0;
+      if (!price || price > maxPriceAUD) continue;
+      const url = el.querySelector('a.s-item__link')?.href || 'https://www.ebay.com.au';
+      const imgEl = el.querySelector('img');
+      const image = imgEl?.src || imgEl?.getAttribute('data-src') || '';
+      out.push({
+        brand: '',
+        item: title,
+        desc: '',
+        size: 'Check listing',
+        origPrice: `AUD ${price.toFixed(0)}`,
+        aud: Math.round(price), under: price < 250,
+        site: 'eBay AU',
+        url, rep: 'auth',
+        notes: 'Live eBay AU listing',
+        image,
+      });
+    } catch {}
+  }
+  if (!out.length) throw new Error('No results found on eBay AU for that keyword.');
+  return out.slice(0, 12);
+}
+
+async function scrapeDepop(keyword, maxPriceAUD) {
+  const html = await proxyFetch(`https://www.depop.com/search/?q=${encodeURIComponent(keyword)}`);
+  const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) throw new Error('Depop page parse failed — try again in a moment.');
+  const data = JSON.parse(m[1]);
+  const products = data?.props?.pageProps?.searchState?.products?.hits || [];
+  const out = [];
+  for (const p of products) {
+    try {
+      const priceAUD = parseFloat(p.price?.nationalPrice?.amountRounded || 0);
+      if (priceAUD > maxPriceAUD) continue;
+      const pics = p.pictures || [];
+      out.push({
+        brand: p.brandName || '',
+        item: (p.description || '').slice(0, 60).trim(),
+        desc: (p.description || '').slice(0, 140).trim(),
+        size: p.sizes?.[0] || 'Check listing',
+        origPrice: `AUD ${priceAUD.toFixed(0)}`,
+        aud: Math.round(priceAUD), under: priceAUD < 250,
+        site: 'Depop',
+        url: `https://www.depop.com/products/${p.slug}/`,
+        rep: 'auth',
+        notes: 'Live Depop listing',
+        image: pics[0]?.url || '',
+      });
+    } catch {}
+  }
+  if (!out.length) throw new Error('No results found on Depop for that keyword.');
+  return out.slice(0, 12);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function cardHTML(it) {
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+// ── The Wall ──────────────────────────────────────────────────────────────────
+const API = 'http://localhost:8001';
+const _broItems = {};
+
+function wallPostHTML(post) {
+  const it = post.item;
+  const imgH = it.image
+    ? `<img src="${esc(it.image)}" alt="${esc(it.item)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=no-img>No photo</div>'">`
+    : '<div class="no-img">No photo</div>';
+  const commentsH = post.comments.length
+    ? post.comments.map(c => `
+        <div class="wall-comment">
+          <span class="wall-comment-name">${esc(c.name)}</span>
+          <span class="wall-comment-text">${esc(c.text)}</span>
+          <span class="wall-comment-time">${timeAgo(c.posted_at)}</span>
+        </div>`).join('')
+    : '<div class="wall-no-comments">No comments yet — be first</div>';
+  return `<div class="wall-post" id="post-${post.id}">
+    <div class="wall-post-header">
+      <span class="wall-time">${timeAgo(post.posted_at)}</span>
+      <span class="wall-site-tag">${esc(it.site)}</span>
+    </div>
+    <div class="wall-body">
+      <div class="wall-thumb">${imgH}</div>
+      <div class="wall-info">
+        <div class="wall-item-title">${esc(it.item)}</div>
+        <div class="wall-item-price">$${it.aud} <span style="font-size:13px;font-weight:400;color:#666">AUD</span></div>
+        <div class="wall-item-site">${esc(it.origPrice)}</div>
+        <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener" style="margin-top:auto;font-size:11px;padding:6px 10px;display:inline-block;width:fit-content">View listing</a>
+      </div>
+    </div>
+    <div class="wall-comments" id="wc-${post.id}">${commentsH}</div>
+    <div class="wall-comment-form">
+      <input class="wall-comment-name-input" id="wn-${post.id}" type="text" placeholder="Name" maxlength="32">
+      <input class="wall-comment-text-input" id="wi-${post.id}" type="text" placeholder="drop a comment…" maxlength="280"
+             onkeydown="if(event.key==='Enter')postComment('${post.id}')">
+      <button class="wall-post-btn" onclick="postComment('${post.id}')">Post</button>
+    </div>
+  </div>`;
+}
+
+async function loadWall() {
+  try {
+    const r = await fetch(`${API}/posts`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const { posts } = await r.json();
+    const heading = document.getElementById('wallHeading');
+    const wall = document.getElementById('wall');
+    if (!posts || !posts.length) {
+      heading.style.display = 'none';
+      wall.innerHTML = '';
+      return;
+    }
+    heading.style.display = '';
+    wall.innerHTML = posts.map(wallPostHTML).join('');
+  } catch {}
+}
+
+async function showTheBros(key) {
+  const item = _broItems[key];
+  if (!item) return;
+  const btn = document.querySelector(`[data-bro="${key}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+  try {
+    const r = await fetch(`${API}/post`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) {
+      if (btn) { btn.textContent = 'Posted! 🔥'; }
+      loadWall();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Show the Bros'; }
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Show the Bros'; }
+  }
+}
+
+async function postComment(postId) {
+  const nameEl = document.getElementById('wn-' + postId);
+  const textEl = document.getElementById('wi-' + postId);
+  const text = textEl?.value.trim();
+  const name = nameEl?.value.trim() || 'Bro';
+  if (!text) return;
+  textEl.value = '';
+  try {
+    const r = await fetch(`${API}/comment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ post_id: postId, text, name }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) loadWall();
+  } catch {}
+}
+
+function cardHTML(it, showBroBtn = false) {
   const tagH = it.rep === 'rep'
     ? '<span class="tag rep">REP</span>'
     : '<span class="tag auth">AUTHENTIC</span>';
@@ -225,6 +532,12 @@ function cardHTML(it) {
   const imgH = it.image
     ? `<img src="${esc(it.image)}" alt="${esc(it.item)}" loading="lazy" onerror="this.parentElement.innerHTML='No preview'">`
     : 'No preview — open listing for photos';
+  let broH = '';
+  if (showBroBtn) {
+    const key = 'b' + Math.random().toString(36).slice(2, 9);
+    _broItems[key] = it;
+    broH = `<button class="bro-btn" data-bro="${key}" onclick="showTheBros('${key}')">Show the Bros 🤙</button>`;
+  }
   return `<div class="card">
     <div class="img">${imgH}</div>
     <div class="body">
@@ -239,6 +552,7 @@ function cardHTML(it) {
       </dl>
       ${it.notes ? `<div class="notes">${esc(it.notes)}</div>` : ''}
       <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">View listing</a>
+      ${broH}
     </div>
   </div>`;
 }
@@ -322,8 +636,17 @@ function renderScrapeGrid() {
     (scrapeFilter === 'under250' && it.under)
   );
   grid.innerHTML = filtered.length
-    ? filtered.map(cardHTML).join('')
+    ? filtered.map(it => cardHTML(it, true)).join('')
     : '<div class="loading" style="padding:30px">No results match that filter.</div>';
+}
+
+async function tryLocalAPI(keyword, site, maxPrice) {
+  const url = `http://localhost:8001/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
+  if (!resp.ok) throw new Error(`API ${resp.status}`);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error);
+  return data.items || [];
 }
 
 async function runScrape() {
@@ -339,26 +662,28 @@ async function runScrape() {
     return;
   }
 
-  if (SCRAPE_API.includes('YOUR-APP')) {
-    statusEl.innerHTML = '<b>Setup needed:</b> Deploy the API to Render first, then paste the URL into index.html where it says SCRAPE_API. See instructions below.';
-    statusEl.className = 'scrape-status err';
-    return;
-  }
-
   runBtn.disabled = true;
   runBtn.textContent = 'Scraping…';
   scrapeResults = [];
   renderScrapeGrid();
-  statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Scraping <b>${esc(site)}</b> for "<b>${esc(keyword)}</b>" — takes ~30s on first run…`;
+  statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Scraping <b>${esc(site)}</b> for "<b>${esc(keyword)}</b>"…`;
   statusEl.className = 'scrape-status';
 
   try {
-    const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
-    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
-    scrapeResults = data.items || [];
+    let results;
+    let source = 'stealth API';
+    try {
+      // Try the local stealth API first (runs Camoufox, actually works)
+      results = await tryLocalAPI(keyword, site, maxPrice);
+    } catch {
+      // Fall back to browser-based CORS proxy (works for eBay, often blocked on Grailed)
+      source = 'proxy';
+      if (site === 'grailed') results = await scrapeGrailed(keyword, maxPrice);
+      else if (site === 'ebay') results = await scrapeEbay(keyword, maxPrice);
+      else results = await scrapeDepop(keyword, maxPrice);
+    }
+
+    scrapeResults = results.map((it, i) => ({ ...it, n: i + 1 }));
     if (!scrapeResults.length) {
       statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}" on ${site}. Try a broader keyword.`;
       statusEl.className = 'scrape-status err';
@@ -378,6 +703,7 @@ async function runScrape() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadData();
+loadWall();
 </script>
 </body>
 </html>
