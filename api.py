@@ -12,6 +12,19 @@ from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
 
+# ── Keyword relevance helpers ──────────────────────────────────────────────────
+
+_STOP = {"a","an","the","and","or","for","in","on","at","to","of","is","it","its","with","by","from","s"}
+
+def _kw_words(keyword: str) -> list:
+    return [w for w in keyword.lower().split() if w not in _STOP and len(w) >= 3]
+
+def _relevant(title: str, kw_words: list) -> bool:
+    if not kw_words:
+        return True
+    t = title.lower()
+    return any(w in t for w in kw_words)
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -107,7 +120,7 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
                         if (!m || seen.has(m[1])) continue;
                         seen.add(m[1]);
                         let node = a;
-                        let price = '', img = '';
+                        let price = '', img = '', title = '';
                         for (let i = 0; i < 8; i++) {
                             if (!node) break;
                             const spans = Array.from(node.querySelectorAll('span'))
@@ -116,11 +129,14 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
                                 price = spans[0].textContent.trim();
                                 const imgEl = node.querySelector('img');
                                 img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
+                                // get real title text from p/h tags near the card
+                                const titleEl = node.querySelector('p,h3,h4,[class*="title"],[class*="Title"]');
+                                title = titleEl ? titleEl.textContent.trim() : (a.textContent.trim().split('\\n')[0] || '');
                                 break;
                             }
                             node = node.parentElement;
                         }
-                        results.push({ href, id: m[1], price, img });
+                        results.push({ href, id: m[1], price, img, title });
                     }
                     return results;
                 }
@@ -130,6 +146,7 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
         print(f"Grailed error: {e}")
         return []
 
+    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -140,8 +157,13 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
             if price_usd > max_usd:
                 continue
             aud = round(price_usd * USD_TO_AUD)
+            # prefer DOM title, fall back to URL slug
+            dom_title = (c.get("title") or "").strip()
             slug_match = re.search(r'/listings/\d+-(.+?)(?:\?|$)', c["href"])
-            title = slug_match.group(1).replace("-", " ").title() if slug_match else keyword.title()
+            slug_title = slug_match.group(1).replace("-", " ").title() if slug_match else ""
+            title = dom_title or slug_title or keyword.title()
+            if not _relevant(title, kw_words):
+                continue
             raw_img = c["img"].rstrip("?")
             img_url = (raw_img + "?w=640") if raw_img and "?" not in raw_img else raw_img
             out.append({
@@ -220,6 +242,7 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
         print(f"Depop error: {e}")
         return []
 
+    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -238,6 +261,8 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
             if inner and re.fullmatch(r'[0-9a-fA-F]{4,}', inner[-1]):
                 inner = inner[:-1]
             title = " ".join(inner).title() if inner else keyword.title()
+            if not _relevant(title, kw_words):
+                continue
             url = f"https://www.depop.com{href}" if href.startswith("/") else href
             out.append({
                 "brand": "",
@@ -260,82 +285,121 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
 
 # ── eBay AU ────────────────────────────────────────────────────────────────────
 
+def _parse_ebay_cards(cards, soup, max_aud: float, keyword: str) -> list:
+    """Try multiple eBay markup patterns and return parsed items."""
+    kw_words = _kw_words(keyword)
+
+    # Selector sets: (card_sel, title_sel, price_sel, link_sel)
+    SELECTOR_SETS = [
+        # Current eBay AU markup (li.s-item is the standard)
+        ("ul.srp-results li.s-item:not(.s-item--large)", ".s-item__title", ".s-item__price", "a.s-item__link"),
+        # Alternate card class seen on some eBay pages
+        ("ul.srp-results li.s-card", ".s-card__title", ".s-card__price", "a.s-card__link"),
+        # Broader fallback
+        (".srp-results li[class*='s-item']", "[class*='title']", "[class*='price']", "a[href*='ebay.com']"),
+    ]
+
+    out = []
+    tried_cards = cards  # start with whatever was pre-selected
+    tried_sel_idx = -1
+
+    for sel_idx, (card_sel, title_sel, price_sel, link_sel) in enumerate(SELECTOR_SETS):
+        if not tried_cards:
+            tried_cards = soup.select(card_sel)
+            print(f"eBay selector set {sel_idx}: {len(tried_cards)} cards")
+        if not tried_cards:
+            continue
+
+        for card in tried_cards:
+            try:
+                title_el = card.select_one(title_sel)
+                if not title_el:
+                    continue
+                title = re.sub(r"Opens?\s+in\s+a\s+new.*", "", title_el.get_text(strip=True), flags=re.IGNORECASE).strip()
+                if not title or title.lower() == "shop on ebay":
+                    continue
+                if not _relevant(title, kw_words):
+                    continue
+
+                price_el = card.select_one(price_sel)
+                if not price_el:
+                    continue
+                price_text = re.split(r"\s+to\s+|–|-", price_el.get_text(strip=True))[0]
+                pm = re.search(r"[\d,]+(?:\.\d+)?", price_text.replace(",", ""))
+                if not pm:
+                    continue
+                price_aud = float(pm.group())
+                if price_aud < 1 or price_aud > max_aud:
+                    continue
+
+                link_el = card.select_one(link_sel) or card.select_one("a[href]")
+                href = link_el["href"] if link_el and link_el.get("href") else ""
+                img_el = card.select_one("img")
+                img = img_el.get("src", "") or img_el.get("data-src", "") if img_el else ""
+
+                out.append({
+                    "brand": "",
+                    "item": title,
+                    "desc": "",
+                    "size": "Check listing",
+                    "origPrice": f"AUD {price_aud:.0f}",
+                    "aud": round(price_aud),
+                    "under": price_aud < 250,
+                    "site": "eBay AU",
+                    "url": href,
+                    "rep": "auth",
+                    "notes": "Live eBay AU listing",
+                    "image": img,
+                })
+            except Exception:
+                continue
+
+        if out:
+            break
+        tried_cards = []  # reset so next iteration tries its own selector
+
+    return out[:12]
+
+
 def _fetch_ebay(keyword: str, max_aud: float) -> list:
     """
     eBay AU search results are server-rendered HTML — plain requests avoids
-    headless-browser bot detection. Must warm up a session cookie first.
-    eBay now uses li.s-card / .s-card__title / .s-card__price (changed from li.s-item).
+    headless-browser bot detection. Tries Men's Clothing category first,
+    falls back to all categories if empty, then tries broader selectors.
     """
     q = urllib.parse.quote_plus(keyword)
-    # _sacat=1059 = Men's Clothing on eBay AU (parent 11450 uses a different layout)
-    # Fall back to all categories if clothing search returns nothing
-    url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=1059&_sop=15&_ipg=60"
     hdrs = {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-AU,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "max-age=0",
+        "Cache-Control": "no-cache",
         "Upgrade-Insecure-Requests": "1",
     }
     sess = _requests.Session()
     sess.headers.update(hdrs)
-    sess.get("https://www.ebay.com.au/", timeout=15)  # warm up session cookie
-    resp = sess.get(url, timeout=30)
-    soup = BeautifulSoup(resp.text, "lxml")
-    cards = soup.select("ul.srp-results li.s-card")
-    print(f"eBay clothing cat: {len(cards)} cards")
-    # If Men's Clothing returns nothing, retry across all categories
-    if not cards:
-        fallback = url.replace("_sacat=1059", "_sacat=0")
-        resp = sess.get(fallback, timeout=30)
-        soup = BeautifulSoup(resp.text, "lxml")
-        cards = soup.select("ul.srp-results li.s-card")
-        print(f"eBay all-cat fallback: {len(cards)} cards")
+    try:
+        sess.get("https://www.ebay.com.au/", timeout=15)  # warm up session cookie
+    except Exception:
+        pass
 
-    out = []
-    for card in cards:
+    # Try Men's Clothing (1059) first, fall back to all categories (0)
+    for sacat in ["1059", "0"]:
+        url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat={sacat}&_sop=15&_ipg=60"
         try:
-            title_el = card.select_one(".s-card__title")
-            if not title_el:
-                continue
-            title = re.sub(r"Opens?\s+in\s+a\s+new.*", "", title_el.get_text(strip=True), flags=re.IGNORECASE).strip()
-            if not title:
-                continue
-
-            price_el = card.select_one(".s-card__price")
-            if not price_el:
-                continue
-            price_text = re.split(r"\s+to\s+|–", price_el.get_text(strip=True))[0]
-            pm = re.search(r"[\d,]+(?:\.\d+)?", price_text.replace(",", ""))
-            if not pm:
-                continue
-            price_aud = float(pm.group())
-            if price_aud < 1 or price_aud > max_aud:
-                continue
-
-            link_el = card.select_one("a.s-card__link")
-            href = link_el["href"] if link_el and link_el.get("href") else ""
-            img_el = card.select_one("img")
-            img = img_el.get("src", "") if img_el else ""
-
-            out.append({
-                "brand": "",
-                "item": title,
-                "desc": "",
-                "size": "Check listing",
-                "origPrice": f"AUD {price_aud:.0f}",
-                "aud": round(price_aud),
-                "under": price_aud < 250,
-                "site": "eBay AU",
-                "url": href,
-                "rep": "auth",
-                "notes": "Live eBay AU listing",
-                "image": img,
-            })
-        except Exception:
+            resp = sess.get(url, timeout=30)
+            soup = BeautifulSoup(resp.text, "lxml")
+            # Try the standard s-item selector first for count reporting
+            cards = soup.select("ul.srp-results li.s-item:not(.s-item--large)")
+            print(f"eBay sacat={sacat}: {len(cards)} s-item cards")
+            result = _parse_ebay_cards(cards, soup, max_aud, keyword)
+            if result:
+                return result
+        except Exception as e:
+            print(f"eBay sacat={sacat} error: {e}")
             continue
-    return out[:12]
+
+    return []
 
 
 async def scrape_ebay(keyword: str, max_usd: float) -> list:
@@ -448,13 +512,19 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
 
             # Buyee Yahoo JP items use /item/jdirectitems/auction/ (confirmed via inspection)
             # Buyee Mercari items use /mercari/item/m…
+            # Broader fallback: any /item/ link on buyee.jp
             cards = await page.evaluate("""
                 () => {
                     const results = [];
                     const seen = new Set();
-                    const anchors = Array.from(document.querySelectorAll(
+                    let anchors = Array.from(document.querySelectorAll(
                         'a[href*="/item/jdirectitems/"], a[href*="/mercari/item/m"]'
                     ));
+                    // fallback to any buyee item link if specific selectors return nothing
+                    if (anchors.length === 0) {
+                        anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
+                            .filter(a => a.href && !a.href.includes('/search/') && !a.href.includes('/category/'));
+                    }
                     for (const a of anchors) {
                         const href = a.getAttribute('href') || a.href || '';
                         if (!href || seen.has(href)) continue;
@@ -488,6 +558,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
         return []
 
     print(f"Buyee raw cards: {len(cards)}")
+    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -498,12 +569,15 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             if not price_jpy or price_jpy > max_jpy:
                 continue
             aud = round(price_jpy / JPY_PER_AUD)
+            title = c["title"] or keyword.title()
+            if not _relevant(title, kw_words):
+                continue
             href = c["href"]
             item_url = f"https://buyee.jp{href}" if href.startswith("/") else href
             source = "Buyee (Mercari JP)" if "/mercari/" in href else "Buyee (Yahoo JP)"
             out.append({
                 "brand": "",
-                "item": c["title"] or keyword.title(),
+                "item": title,
                 "desc": "",
                 "size": "Check listing",
                 "origPrice": f"¥{price_jpy:,.0f}",
@@ -579,7 +653,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
         return []
 
     print(f"Yahoo JP raw cards: {len(cards)}")
-
+    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -591,6 +665,9 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
             if not price_jpy or price_jpy > max_jpy:
                 continue
             aud = round(price_jpy / JPY_PER_AUD)
+            title = c["title"] or keyword.title()
+            if not _relevant(title, kw_words):
+                continue
             href = c["href"]
             # Build Buyee proxy URL from the Yahoo auction ID so the user can actually bid
             auction_id_m = re.search(r'/auction/([a-zA-Z0-9]+)', href)
@@ -600,7 +677,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
                 item_url = href
             out.append({
                 "brand": "",
-                "item": c["title"] or keyword.title(),
+                "item": title,
                 "desc": "",
                 "size": "Check listing",
                 "origPrice": f"¥{price_jpy:,.0f}",

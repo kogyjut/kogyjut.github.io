@@ -6,6 +6,9 @@
 <title>AI Cloths Finder — Archive Picks</title>
 <meta name="description" content="Curated men's archive and designer fashion finds under 500 AUD across Buyee, Yahoo Auctions JP, Grailed and Taobao agents.">
 <meta name="theme-color" content="#111111">
+<!-- Firebase v8 compat -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 <style>
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -120,6 +123,149 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   background:#111; color:#fff; font-weight:700; letter-spacing:.05em;
   margin-right:6px; vertical-align:middle;
 }
+
+/* ── SHOW THE BROS button ──────────────────────────────────────────────────── */
+.show-bros-btn {
+  display:block; width:100%; margin-top:8px;
+  padding:10px; background:#b41e1e; color:#fff;
+  border:none; border-radius:6px;
+  font:700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing:.09em; text-transform:uppercase; cursor:pointer;
+  transition:background .1s, transform .1s, box-shadow .1s;
+  box-shadow:0 2px 8px rgba(180,30,30,.25);
+}
+.show-bros-btn:hover { background:#8f1616; transform:translateY(-1px); box-shadow:0 4px 14px rgba(180,30,30,.38); }
+
+/* ── Bros Modal overlay ────────────────────────────────────────────────────── */
+.bros-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.7);
+  z-index:200; display:flex; align-items:center; justify-content:center;
+  padding:16px;
+}
+.bros-box {
+  background:#fff; border-radius:16px; max-width:480px; width:100%;
+  max-height:92vh; overflow-y:auto; padding:28px 24px 24px;
+  position:relative;
+}
+.bros-box h2 { margin:0 0 2px; font-size:21px; letter-spacing:-.01em; }
+.bros-box .bros-sub { color:#888; font-size:12.5px; margin:0 0 18px; }
+.bros-close {
+  position:absolute; top:14px; right:16px;
+  background:none; border:none; font-size:24px; line-height:1;
+  cursor:pointer; color:#999; padding:0;
+}
+.bros-close:hover { color:#111; }
+.bros-preview {
+  display:flex; gap:12px; align-items:flex-start;
+  padding:12px; background:#f6f6f6; border-radius:10px; margin-bottom:18px;
+}
+.bros-preview img {
+  width:76px; height:76px; object-fit:cover; border-radius:8px; flex-shrink:0;
+}
+.bros-preview-info { flex:1; min-width:0; }
+.bros-preview-info .pi-brand { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#999; }
+.bros-preview-info .pi-title { font-size:13px; font-weight:600; margin:2px 0 4px; line-height:1.3; }
+.bros-preview-info .pi-price { font-size:15px; font-weight:700; }
+.bros-preview-info .pi-site { font-size:11px; color:#999; margin-top:1px; }
+.bros-field { margin-bottom:14px; }
+.bros-field label {
+  display:block; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.07em; color:#888; font-weight:600; margin-bottom:6px;
+}
+.bros-field input, .bros-field textarea {
+  width:100%; padding:10px 12px; border:1px solid #d4d4d4; border-radius:8px;
+  font:inherit; font-size:14px; background:#fff;
+  transition:border-color .1s;
+}
+.bros-field input:focus, .bros-field textarea:focus { outline:none; border-color:#111; }
+.bros-field textarea { min-height:80px; resize:vertical; }
+.bros-submit {
+  display:block; width:100%; padding:13px;
+  background:#b41e1e; color:#fff; border:none; border-radius:8px;
+  font:700 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing:.07em; text-transform:uppercase; cursor:pointer;
+  transition:background .1s;
+  box-shadow:0 2px 10px rgba(180,30,30,.3);
+}
+.bros-submit:hover { background:#8f1616; }
+.bros-submit:disabled { background:#ccc; cursor:not-allowed; box-shadow:none; }
+
+/* ── Bros Social Feed ──────────────────────────────────────────────────────── */
+.bros-feed-wrap { margin:28px 0 8px; }
+.bros-feed-top {
+  display:flex; align-items:baseline; gap:10px; margin-bottom:14px;
+  border-bottom:2px solid #111; padding-bottom:10px;
+}
+.bros-feed-top h2 {
+  margin:0; font-size:18px; letter-spacing:.04em; text-transform:uppercase;
+}
+.bros-feed-count { font-size:12px; color:#999; }
+.bpost {
+  background:#fff; border:1px solid #e5e5e5; border-radius:14px;
+  overflow:hidden; margin-bottom:14px;
+}
+.bpost-head { display:flex; align-items:center; gap:10px; padding:14px 14px 0; }
+.bpost-avatar {
+  width:38px; height:38px; border-radius:50%; background:#b41e1e;
+  display:flex; align-items:center; justify-content:center;
+  color:#fff; font:700 15px/1 -apple-system, sans-serif;
+  flex-shrink:0; text-transform:uppercase;
+}
+.bpost-meta { flex:1; }
+.bpost-name { font-weight:700; font-size:13.5px; }
+.bpost-time { font-size:11px; color:#aaa; }
+.bpost-caption { padding:10px 14px 12px; font-size:14px; color:#222; line-height:1.5; }
+.bpost-item {
+  display:flex; gap:12px; align-items:flex-start;
+  padding:12px 14px; background:#f8f8f8;
+  border-top:1px solid #efefef; border-bottom:1px solid #efefef;
+}
+.bpost-item img {
+  width:68px; height:68px; object-fit:cover; border-radius:8px; flex-shrink:0;
+}
+.bpost-item-info { flex:1; min-width:0; }
+.bpost-item-brand { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#999; }
+.bpost-item-title { font-size:13px; font-weight:600; margin:2px 0 3px; line-height:1.3; }
+.bpost-item-price { font-size:14px; font-weight:700; }
+.bpost-item-link { font-size:11.5px; color:#0563c1; text-decoration:none; display:inline-block; margin-top:3px; }
+.bpost-item-link:hover { text-decoration:underline; }
+.bpost-comments { padding:10px 14px 14px; }
+.bpost-clist { margin-bottom:10px; }
+.bpost-comment { display:flex; gap:8px; margin-bottom:8px; align-items:flex-start; }
+.bpost-cav {
+  width:26px; height:26px; border-radius:50%; background:#333;
+  display:flex; align-items:center; justify-content:center;
+  color:#fff; font:700 10px/1 -apple-system, sans-serif;
+  flex-shrink:0; text-transform:uppercase;
+}
+.bpost-cbody {
+  flex:1; background:#f3f3f3; border-radius:10px; padding:6px 10px; font-size:13px;
+}
+.bpost-cname { font-weight:700; font-size:11px; margin-bottom:1px; color:#444; }
+.bpost-add {
+  display:flex; gap:8px; align-items:center; margin-top:4px;
+}
+.bpost-add input {
+  flex:1; padding:8px 12px; border:1px solid #e0e0e0; border-radius:20px;
+  font:inherit; font-size:13px; background:#fff;
+}
+.bpost-add input:focus { outline:none; border-color:#111; }
+.bpost-add button {
+  padding:8px 16px; background:#111; color:#fff;
+  border:none; border-radius:20px; font:600 12px/1 inherit; cursor:pointer;
+  white-space:nowrap;
+}
+.bpost-add button:hover { background:#000; }
+.bros-empty { text-align:center; padding:44px 20px; color:#aaa; font-size:13px; }
+.bros-setup {
+  background:#fff; border:1px solid #e5e5e5; border-radius:12px;
+  padding:20px 22px; font-size:13px; color:#555;
+}
+.bros-setup b { color:#111; }
+.bros-setup code {
+  display:inline-block; background:#f4f4f4; border-radius:4px;
+  padding:1px 6px; font-size:12px; color:#b41e1e;
+}
 </style>
 </head>
 <body>
@@ -174,6 +320,36 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   <div class="grid" id="scrapeGrid"></div>
 </div>
 
+<!-- ── SHOW THE BROS MODAL ───────────────────────────────────────────────── -->
+<div class="bros-overlay hide" id="brosOverlay">
+  <div class="bros-box">
+    <button class="bros-close" onclick="closeBrosModal()">&times;</button>
+    <h2>SHOW THE BROS</h2>
+    <p class="bros-sub">Post this find to the group feed</p>
+    <div class="bros-preview" id="brosPreview"></div>
+    <div class="bros-field">
+      <label>Your Name</label>
+      <input type="text" id="brosName" placeholder="e.g. Nathan" autocomplete="nickname">
+    </div>
+    <div class="bros-field">
+      <label>Caption</label>
+      <textarea id="brosCaption" placeholder="Why are you fw this piece?"></textarea>
+    </div>
+    <button class="bros-submit" id="brosSubmit" onclick="submitBrosPost()">POST TO THE BROS</button>
+  </div>
+</div>
+
+<!-- ── BROS SOCIAL FEED ──────────────────────────────────────────────────── -->
+<div class="bros-feed-wrap">
+  <div class="bros-feed-top">
+    <h2>The Bros' Finds</h2>
+    <span class="bros-feed-count" id="brosFeedCount"></span>
+  </div>
+  <div id="brosFeed">
+    <div class="bros-empty">Loading feed...</div>
+  </div>
+</div>
+
 <!-- ── SCHEDULED PICKS TOOLBAR ───────────────────────────────────────────── -->
 <div class="toolbar">
   <input id="q" type="search" placeholder="Search scheduled picks...">
@@ -212,12 +388,37 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <script>
 const SCRAPE_API = 'https://kogyjut-github-io.onrender.com';
 
+// ── Firebase Config ───────────────────────────────────────────────────────────
+// SETUP REQUIRED — replace the values below with your Firebase project config:
+// 1. Go to https://console.firebase.google.com
+// 2. Create a new project (or use an existing one)
+// 3. Click the </> web icon to add a web app
+// 4. Copy the firebaseConfig object values here
+// 5. In Firestore > Rules, set: allow read, write: if true;  (for friends-only use)
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyDm-JFMD8qdpJX9WXhReFbVuKpzTWhQk8s",
+  authDomain:        "dripfound.firebaseapp.com",
+  projectId:         "dripfound",
+  storageBucket:     "dripfound.firebasestorage.app",
+  messagingSenderId: "490154144137",
+  appId:             "1:490154144137:web:c1c701b5df39b149347158"
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// ── Item Registry (maps random key -> item object for the modal) ──────────────
+const _itemReg = {};
+function _regItem(it) {
+  const key = 'k' + Math.random().toString(36).slice(2, 10);
+  _itemReg[key] = it;
+  return key;
+}
+
 function cardHTML(it) {
+  const key = _regItem(it);
   const tagH = it.rep === 'rep'
     ? '<span class="tag rep">REP</span>'
     : '<span class="tag auth">AUTHENTIC</span>';
@@ -240,6 +441,7 @@ function cardHTML(it) {
       </dl>
       ${it.notes ? `<div class="notes">${esc(it.notes)}</div>` : ''}
       <a class="btn" href="${esc(it.url)}" target="_blank" rel="noopener">View listing</a>
+      <button class="show-bros-btn" onclick="openBrosModal('${key}')">SHOW THE BROS</button>
     </div>
   </div>`;
 }
@@ -298,6 +500,9 @@ document.getElementById('q').addEventListener('input', render);
 let scrapeFilter = 'all';
 let scrapeResults = [];
 
+const SITE_LABELS = { grailed:'Grailed', depop:'Depop', ebay:'eBay AU', buyee:'Buyee', yahoo_jp:'Yahoo JP' };
+const ALL_SITES = ['grailed', 'depop', 'ebay', 'buyee', 'yahoo_jp'];
+
 function togglePanel() {
   const btn = document.getElementById('scrapeBtn');
   const panel = document.getElementById('scrapePanel');
@@ -334,7 +539,7 @@ function toggleSite(el) {
 async function runScrape() {
   const keyword = document.getElementById('scrapeKeyword').value.trim();
   const maxPrice = parseInt(document.getElementById('scrapeMaxPrice').value) || 500;
-  const sites = Array.from(document.querySelectorAll('.site-chips .chip.active')).map(el => el.dataset.site);
+  const selectedSites = Array.from(document.querySelectorAll('.site-chips .chip.active')).map(el => el.dataset.site);
   const statusEl = document.getElementById('scrapeStatus');
   const runBtn = document.getElementById('runBtn');
 
@@ -343,7 +548,7 @@ async function runScrape() {
     statusEl.className = 'scrape-status err';
     return;
   }
-  if (!sites.length) {
+  if (!selectedSites.length) {
     statusEl.textContent = 'Select at least one site.';
     statusEl.className = 'scrape-status err';
     return;
@@ -354,56 +559,293 @@ async function runScrape() {
   scrapeResults = [];
   renderScrapeGrid();
 
-  // Track per-site state for live status line
-  const state = Object.fromEntries(sites.map(s => [s, { done: false, count: 0, err: '' }]));
+  const siteState = {};  // site -> { done, count, err }
 
-  function updateStatus() {
-    const pending = sites.filter(s => !state[s].done);
+  function lbl(s) { return SITE_LABELS[s] || s; }
+
+  function statusBar(activeSites, note) {
+    const pending = activeSites.filter(s => !siteState[s]?.done);
+    const done = activeSites.filter(s => siteState[s]?.done);
     const total = scrapeResults.length;
-    const siteLabels = { grailed:'Grailed', depop:'Depop', ebay:'eBay AU', buyee:'Buyee', yahoo_jp:'Yahoo JP' };
+    const perSite = done.map(s => {
+      const st = siteState[s];
+      if (st.err) return `${lbl(s)}: <span style="color:#c0392b">err</span>`;
+      return `${lbl(s)}: ${st.count ? `<b>${st.count}</b>` : '<span style="color:#bbb">0</span>'}`;
+    }).join(' &nbsp;&middot;&nbsp; ');
+    const detail = perSite ? `<br><small style="color:#999;font-size:11px">${perSite}</small>` : '';
+
     if (pending.length) {
-      const dots = '<span class="loading-dot">•</span>'.repeat(3);
-      statusEl.innerHTML = `${dots}&nbsp; Waiting on <b>${pending.map(s => siteLabels[s]||s).join(', ')}</b>${total ? ` — <b>${total}</b> results so far` : ''}`;
+      statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Checking <b>${pending.map(lbl).join(', ')}</b>${total ? ` — <b>${total}</b> found so far` : ''}${note ? ` <span style="color:#888">(${note})</span>` : ''}${detail}`;
       statusEl.className = 'scrape-status';
     } else {
       if (!total) {
-        statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}". Try a broader keyword.`;
+        statusEl.innerHTML = `No results under $${maxPrice} AUD for "<b>${esc(keyword)}</b>". Try a broader keyword.${detail}`;
         statusEl.className = 'scrape-status err';
       } else {
-        statusEl.innerHTML = `<span class="live-tag">LIVE</span> Found <b>${total}</b> results for "<b>${esc(keyword)}</b>" across ${sites.length} site${sites.length > 1 ? 's' : ''}`;
+        const siteCount = new Set(scrapeResults.map(r => r.site)).size;
+        statusEl.innerHTML = `<span class="live-tag">LIVE</span> <b>${total}</b> results for "<b>${esc(keyword)}</b>" across <b>${siteCount}</b> site${siteCount !== 1 ? 's' : ''}${detail}`;
         statusEl.className = 'scrape-status ok';
       }
     }
   }
 
-  updateStatus();
-
-  const promises = sites.map(async site => {
+  async function fetchSite(site, activeSites, note) {
+    siteState[site] = { done: false, count: 0, err: '' };
+    statusBar(activeSites, note);
     try {
-      const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
-      if (!resp.ok) throw new Error(`${resp.status}`);
+      const resp = await fetch(
+        `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`,
+        { signal: AbortSignal.timeout(90000) }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
-      const items = data.items || [];
-      scrapeResults.push(...items);
-      // Re-number all results
+      const its = data.items || [];
+      scrapeResults.push(...its);
       scrapeResults.forEach((it, i) => { it.n = i + 1; });
-      state[site] = { done: true, count: items.length, err: '' };
+      siteState[site] = { done: true, count: its.length, err: '' };
       renderScrapeGrid();
     } catch (e) {
-      state[site] = { done: true, count: 0, err: e.message };
+      siteState[site] = { done: true, count: 0, err: e.message };
     }
-    updateStatus();
-  });
+    statusBar(activeSites, note);
+  }
 
-  await Promise.allSettled(promises);
+  // Primary batch
+  statusBar(selectedSites, '');
+  await Promise.allSettled(selectedSites.map(s => fetchSite(s, selectedSites, '')));
+
+  // Auto-fallback: if < 3 results, automatically try any sites that weren't selected
+  const fallbackSites = ALL_SITES.filter(s => !selectedSites.includes(s));
+  if (scrapeResults.length < 3 && fallbackSites.length) {
+    const allActive = [...selectedSites, ...fallbackSites];
+    fallbackSites.forEach(s => { siteState[s] = { done: false, count: 0, err: '' }; });
+    await Promise.allSettled(fallbackSites.map(s => fetchSite(s, allActive, 'auto-expanding search')));
+  }
+
+  statusBar(Object.keys(siteState), '');
   runBtn.disabled = false;
   runBtn.textContent = 'Scrape';
 }
 
+// ── SHOW THE BROS — Modal ─────────────────────────────────────────────────────
+let _brosCurrentKey = null;
+
+function openBrosModal(key) {
+  const it = _itemReg[key];
+  if (!it) return;
+  _brosCurrentKey = key;
+  const imgSrc = it.image || it.img || '';
+  document.getElementById('brosPreview').innerHTML =
+    (imgSrc ? `<img src="${esc(imgSrc)}" alt="${esc(it.item)}" onerror="this.style.display='none'">` : '') +
+    `<div class="bros-preview-info">
+      <div class="pi-brand">${esc(it.brand)}</div>
+      <div class="pi-title">${esc(it.item)}</div>
+      <div class="pi-price">$${esc(String(it.aud))} AUD</div>
+      <div class="pi-site">${esc(it.site)}</div>
+    </div>`;
+  document.getElementById('brosName').value = localStorage.getItem('brosName') || '';
+  document.getElementById('brosCaption').value = '';
+  document.getElementById('brosOverlay').classList.remove('hide');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => {
+    const nameEl = document.getElementById('brosName');
+    (nameEl.value ? document.getElementById('brosCaption') : nameEl).focus();
+  }, 50);
+}
+
+function closeBrosModal() {
+  document.getElementById('brosOverlay').classList.add('hide');
+  document.body.style.overflow = '';
+  _brosCurrentKey = null;
+}
+
+document.getElementById('brosOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeBrosModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeBrosModal();
+});
+
+async function submitBrosPost() {
+  const nameEl = document.getElementById('brosName');
+  const capEl = document.getElementById('brosCaption');
+  const name = nameEl.value.trim();
+  const caption = capEl.value.trim();
+  if (!name) { nameEl.focus(); return; }
+  if (!caption) { capEl.focus(); return; }
+
+  const it = _itemReg[_brosCurrentKey];
+  if (!it) return;
+
+  if (!window._db) {
+    alert('Firebase not set up yet — see the code comments to configure it.');
+    return;
+  }
+
+  localStorage.setItem('brosName', name);
+
+  const btn = document.getElementById('brosSubmit');
+  btn.disabled = true;
+  btn.textContent = 'Posting…';
+
+  try {
+    await window._db.collection('posts').add({
+      name,
+      caption,
+      item: {
+        brand:     it.brand     || '',
+        title:     it.item      || '',
+        price:     it.aud       || '',
+        origPrice: it.origPrice || '',
+        site:      it.site      || '',
+        url:       it.url       || '',
+        img:       it.image || it.img || '',
+        size:      it.size      || '',
+        rep:       it.rep       || '',
+      },
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    closeBrosModal();
+  } catch (e) {
+    console.error(e);
+    btn.textContent = 'Error — try again';
+    btn.disabled = false;
+  }
+}
+
+// ── SHOW THE BROS — Social Feed ───────────────────────────────────────────────
+function timeAgo(ts) {
+  if (!ts) return 'just now';
+  const secs = Math.floor((Date.now() - ts.toMillis()) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  return Math.floor(secs / 86400) + 'd ago';
+}
+
+function renderPost(p) {
+  const it = p.item || {};
+  const initial = esc((p.name || '?')[0].toUpperCase());
+  return `<div class="bpost" id="post-${p.id}">
+    <div class="bpost-head">
+      <div class="bpost-avatar">${initial}</div>
+      <div class="bpost-meta">
+        <div class="bpost-name">${esc(p.name)}</div>
+        <div class="bpost-time">${timeAgo(p.timestamp)}</div>
+      </div>
+    </div>
+    ${p.caption ? `<div class="bpost-caption">${esc(p.caption)}</div>` : ''}
+    <div class="bpost-item">
+      ${it.img ? `<img src="${esc(it.img)}" alt="${esc(it.title)}" onerror="this.style.display='none'">` : ''}
+      <div class="bpost-item-info">
+        <div class="bpost-item-brand">${esc(it.brand)}</div>
+        <div class="bpost-item-title">${esc(it.title)}</div>
+        <div class="bpost-item-price">$${esc(String(it.price))} AUD</div>
+        ${it.url ? `<a class="bpost-item-link" href="${esc(it.url)}" target="_blank" rel="noopener">View listing &rarr;</a>` : ''}
+      </div>
+    </div>
+    <div class="bpost-comments">
+      <div class="bpost-clist" id="clist-${p.id}"></div>
+      <div class="bpost-add">
+        <input type="text" placeholder="Add a comment…" id="ci-${p.id}"
+          onkeydown="if(event.key==='Enter')addComment('${p.id}')">
+        <button onclick="addComment('${p.id}')">Post</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function subscribeComments(postId) {
+  window._db.collection('posts').doc(postId).collection('comments')
+    .orderBy('timestamp', 'asc')
+    .onSnapshot(snap => {
+      const el = document.getElementById('clist-' + postId);
+      if (!el) return;
+      if (!snap.docs.length) { el.innerHTML = ''; return; }
+      el.innerHTML = snap.docs.map(d => {
+        const c = d.data();
+        return `<div class="bpost-comment">
+          <div class="bpost-cav">${esc((c.name || '?')[0].toUpperCase())}</div>
+          <div class="bpost-cbody">
+            <div class="bpost-cname">${esc(c.name)}</div>
+            ${esc(c.text)}
+          </div>
+        </div>`;
+      }).join('');
+    });
+}
+
+async function addComment(postId) {
+  const input = document.getElementById('ci-' + postId);
+  const text = input.value.trim();
+  if (!text) return;
+
+  let name = localStorage.getItem('brosName');
+  if (!name) {
+    name = (prompt('Your name?') || '').trim();
+    if (!name) return;
+    localStorage.setItem('brosName', name);
+  }
+
+  input.value = '';
+  try {
+    await window._db.collection('posts').doc(postId).collection('comments').add({
+      name,
+      text,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.error(e);
+    input.value = text;
+  }
+}
+
+function initFeed() {
+  window._db.collection('posts').orderBy('timestamp', 'desc').onSnapshot(snap => {
+    const posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const countEl = document.getElementById('brosFeedCount');
+    countEl.textContent = posts.length ? `${posts.length} post${posts.length !== 1 ? 's' : ''}` : '';
+
+    if (!posts.length) {
+      document.getElementById('brosFeed').innerHTML =
+        '<div class="bros-empty">No posts yet — find something sick and hit SHOW THE BROS</div>';
+      return;
+    }
+
+    document.getElementById('brosFeed').innerHTML = posts.map(renderPost).join('');
+    posts.forEach(p => subscribeComments(p.id));
+  });
+}
+
+// ── Firebase Init ─────────────────────────────────────────────────────────────
+function initFirebase() {
+  if (FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
+    document.getElementById('brosFeed').innerHTML = `
+      <div class="bros-setup">
+        <b>Firebase setup needed to enable the social feed.</b><br><br>
+        1. Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a>
+           and create a free project<br>
+        2. Add a web app, copy the config values into <code>FIREBASE_CONFIG</code> at the top of the script<br>
+        3. Enable Firestore in the Firebase console (start in test mode for friends-only use)<br>
+        4. Redeploy — the feed will appear here
+      </div>`;
+    return;
+  }
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    window._db = firebase.firestore();
+    initFeed();
+  } catch (e) {
+    console.error('Firebase init failed:', e);
+    document.getElementById('brosFeed').innerHTML =
+      `<div class="bros-empty" style="color:#c0392b">Firebase error: ${esc(e.message)}</div>`;
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadData();
+initFirebase();
 </script>
 </body>
 </html>
