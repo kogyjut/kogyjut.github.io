@@ -275,7 +275,6 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 <h1>AI Cloths Finder — Archive Picks</h1>
 <p class="sub">Live archive and designer finds under 500 AUD — auto-scraped from Grailed every 8 hours. Tap the button below to search any site live.</p>
 </div>
-<span class="lastup" id="lastupdated">Loading...</span>
 </header>
 
 <!-- ── GIANT SCRAPE BUTTON ───────────────────────────────────────────────── -->
@@ -350,23 +349,6 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   </div>
 </div>
 
-<!-- ── SCHEDULED PICKS TOOLBAR ───────────────────────────────────────────── -->
-<div class="toolbar">
-  <input id="q" type="search" placeholder="Search scheduled picks...">
-  <span class="chip active" data-filter="all">All</span>
-  <span class="chip" data-filter="auth">Authentic</span>
-  <span class="chip" data-filter="rep">Reps only</span>
-  <span class="chip" data-filter="under250">Under 250 AUD</span>
-  <span class="stats">Showing <b id="count">—</b> of <b id="total">—</b></span>
-</div>
-<div class="grid" id="grid">
-  <div class="loading">
-    <span class="loading-dot">•</span>
-    <span class="loading-dot">•</span>
-    <span class="loading-dot">•</span>
-    <br><br>Loading scheduled picks…
-  </div>
-</div>
 
 <div class="section-h">Where to keep looking</div>
 <div class="sites">
@@ -446,55 +428,6 @@ function cardHTML(it) {
   </div>`;
 }
 
-// ── Scheduled picks (data.json) ───────────────────────────────────────────────
-let items = [];
-let activeFilter = 'all';
-
-function render() {
-  const q = document.getElementById('q').value.trim().toLowerCase();
-  const grid = document.getElementById('grid');
-  const countEl = document.getElementById('count');
-  const totalEl = document.getElementById('total');
-  if (!items.length) {
-    grid.innerHTML = '<div class="loading">No listings loaded yet — run the GitHub Action to populate.</div>';
-    countEl.textContent = '0'; totalEl.textContent = '0';
-    return;
-  }
-  let v = 0, html = '';
-  for (const it of items) {
-    const mq = !q || (it.brand+' '+it.item+' '+(it.desc||'')+' '+it.site+' '+(it.notes||'')).toLowerCase().includes(q);
-    const mf = activeFilter==='all'
-      ||(activeFilter==='auth'&&it.rep==='auth')
-      ||(activeFilter==='rep'&&it.rep==='rep')
-      ||(activeFilter==='under250'&&it.under);
-    if (mq&&mf) v++;
-    html += `<div class="${mq&&mf?'':'hide'}">${cardHTML(it)}</div>`;
-  }
-  grid.innerHTML = html || '<div class="loading">No results match your filters.</div>';
-  countEl.textContent = v; totalEl.textContent = items.length;
-}
-
-async function loadData() {
-  try {
-    const resp = await fetch('data.json?t=' + Date.now());
-    if (!resp.ok) throw new Error('missing');
-    const data = await resp.json();
-    items = data.items || [];
-    document.getElementById('lastupdated').textContent = 'Last updated: ' + (data.last_updated || '—');
-    render();
-  } catch {
-    document.getElementById('lastupdated').textContent = 'Not yet scraped';
-    document.getElementById('grid').innerHTML = '<div class="loading">Run the GitHub Action first to load scheduled picks.</div>';
-  }
-}
-
-document.querySelectorAll('.toolbar .chip').forEach(c => c.addEventListener('click', () => {
-  document.querySelectorAll('.toolbar .chip').forEach(x => x.classList.remove('active'));
-  c.classList.add('active');
-  activeFilter = c.dataset.filter;
-  render();
-}));
-document.getElementById('q').addEventListener('input', render);
 
 // ── Scrape Panel ──────────────────────────────────────────────────────────────
 let scrapeFilter = 'all';
@@ -844,7 +777,6 @@ function initFirebase() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-loadData();
 initFirebase();
 </script>
 </body>
