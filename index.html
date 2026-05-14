@@ -622,30 +622,34 @@ async function submitBrosPost() {
   btn.disabled = true;
   btn.textContent = 'Posting…';
 
+  const reset = () => { btn.disabled = false; btn.textContent = 'POST TO THE BROS'; };
   try {
-    await window._db.collection('posts').add({
-      name,
-      caption,
-      item: {
-        brand:     it.brand     || '',
-        title:     it.item      || '',
-        price:     it.aud       || '',
-        origPrice: it.origPrice || '',
-        site:      it.site      || '',
-        url:       it.url       || '',
-        img:       it.image || it.img || '',
-        size:      it.size      || '',
-        rep:       it.rep       || '',
-      },
-      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    btn.disabled = false;
-    btn.textContent = 'POST TO THE BROS';
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+    await Promise.race([
+      window._db.collection('posts').add({
+        name,
+        caption,
+        item: {
+          brand:     it.brand     || '',
+          title:     it.item      || '',
+          price:     it.aud       || '',
+          origPrice: it.origPrice || '',
+          site:      it.site      || '',
+          url:       it.url       || '',
+          img:       it.image || it.img || '',
+          size:      it.size      || '',
+          rep:       it.rep       || '',
+        },
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      }),
+      timeout
+    ]);
+    reset();
     closeBrosModal();
   } catch (e) {
     console.error(e);
-    btn.textContent = 'Error — try again';
-    btn.disabled = false;
+    btn.textContent = e.message === 'timeout' ? 'Timed out — try again' : 'Error — try again';
+    setTimeout(reset, 2000);
   }
 }
 
