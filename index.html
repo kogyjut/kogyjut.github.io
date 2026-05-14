@@ -98,6 +98,9 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
 .scrape-field select { width:160px; }
 .scrape-filter-row { display:flex; gap:8px; flex-wrap:wrap; }
 .scrape-filter-row .chip { font-size:11.5px; }
+.site-chips { display:flex; gap:7px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+.site-chips .chip { font-size:11.5px; }
+.site-chips .chip.active { background:#111; color:#fff; border-color:#111; }
 .run-btn {
   padding:10px 28px; background:#111; color:#fff;
   border:none; border-radius:7px; font:700 13px/1 inherit;
@@ -139,17 +142,6 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   <div class="scrape-controls">
 
     <div class="scrape-field">
-      <label>Site</label>
-      <select id="scrapeSite">
-        <option value="grailed">Grailed</option>
-        <option value="depop">Depop</option>
-        <option value="ebay">eBay AU</option>
-        <option value="buyee">Buyee (JP)</option>
-        <option value="yahoo_jp">Yahoo Auctions JP</option>
-      </select>
-    </div>
-
-    <div class="scrape-field">
       <label>Keyword</label>
       <input type="text" id="scrapeKeyword" placeholder="e.g. rick owens jacket" onkeydown="if(event.key==='Enter')runScrape()">
     </div>
@@ -160,6 +152,15 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
     </div>
 
     <button class="run-btn" id="runBtn" onclick="runScrape()">Scrape</button>
+  </div>
+
+  <div class="site-chips">
+    <span style="font-size:11px;color:#888;align-self:center;margin-right:2px;">Sites:</span>
+    <span class="chip active" data-site="grailed" onclick="toggleSite(this)">Grailed</span>
+    <span class="chip" data-site="depop" onclick="toggleSite(this)">Depop</span>
+    <span class="chip" data-site="ebay" onclick="toggleSite(this)">eBay AU</span>
+    <span class="chip" data-site="buyee" onclick="toggleSite(this)">Buyee (JP)</span>
+    <span class="chip" data-site="yahoo_jp" onclick="toggleSite(this)">Yahoo Auctions JP</span>
   </div>
 
   <div class="scrape-filter-row" style="margin-bottom:14px;">
@@ -326,10 +327,14 @@ function renderScrapeGrid() {
     : '<div class="loading" style="padding:30px">No results match that filter.</div>';
 }
 
+function toggleSite(el) {
+  el.classList.toggle('active');
+}
+
 async function runScrape() {
   const keyword = document.getElementById('scrapeKeyword').value.trim();
-  const site = document.getElementById('scrapeSite').value;
   const maxPrice = parseInt(document.getElementById('scrapeMaxPrice').value) || 500;
+  const sites = Array.from(document.querySelectorAll('.site-chips .chip.active')).map(el => el.dataset.site);
   const statusEl = document.getElementById('scrapeStatus');
   const runBtn = document.getElementById('runBtn');
 
@@ -338,9 +343,8 @@ async function runScrape() {
     statusEl.className = 'scrape-status err';
     return;
   }
-
-  if (SCRAPE_API.includes('localhost')) {
-    statusEl.innerHTML = '<b>Setup needed:</b> Deploy the API to Render first, then paste the URL into index.html where it says SCRAPE_API.';
+  if (!sites.length) {
+    statusEl.textContent = 'Select at least one site.';
     statusEl.className = 'scrape-status err';
     return;
   }
@@ -349,31 +353,53 @@ async function runScrape() {
   runBtn.textContent = 'Scraping…';
   scrapeResults = [];
   renderScrapeGrid();
-  statusEl.innerHTML = `<span class="loading-dot">•</span><span class="loading-dot">•</span><span class="loading-dot">•</span>&nbsp; Scraping <b>${esc(site)}</b> for "<b>${esc(keyword)}</b>" — takes ~30s on first run…`;
-  statusEl.className = 'scrape-status';
 
-  try {
-    const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
-    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
-    scrapeResults = data.items || [];
-    if (!scrapeResults.length) {
-      statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}" on ${site}. Try a broader keyword.`;
-      statusEl.className = 'scrape-status err';
+  // Track per-site state for live status line
+  const state = Object.fromEntries(sites.map(s => [s, { done: false, count: 0, err: '' }]));
+
+  function updateStatus() {
+    const pending = sites.filter(s => !state[s].done);
+    const total = scrapeResults.length;
+    const siteLabels = { grailed:'Grailed', depop:'Depop', ebay:'eBay AU', buyee:'Buyee', yahoo_jp:'Yahoo JP' };
+    if (pending.length) {
+      const dots = '<span class="loading-dot">•</span>'.repeat(3);
+      statusEl.innerHTML = `${dots}&nbsp; Waiting on <b>${pending.map(s => siteLabels[s]||s).join(', ')}</b>${total ? ` — <b>${total}</b> results so far` : ''}`;
+      statusEl.className = 'scrape-status';
     } else {
-      statusEl.innerHTML = `<span class="live-tag">LIVE</span> Found <b>${scrapeResults.length}</b> results for "<b>${esc(keyword)}</b>" on ${esc(site)}`;
-      statusEl.className = 'scrape-status ok';
+      if (!total) {
+        statusEl.textContent = `No results under $${maxPrice} AUD for "${keyword}". Try a broader keyword.`;
+        statusEl.className = 'scrape-status err';
+      } else {
+        statusEl.innerHTML = `<span class="live-tag">LIVE</span> Found <b>${total}</b> results for "<b>${esc(keyword)}</b>" across ${sites.length} site${sites.length > 1 ? 's' : ''}`;
+        statusEl.className = 'scrape-status ok';
+      }
     }
-    renderScrapeGrid();
-  } catch (e) {
-    statusEl.textContent = 'Scrape failed: ' + e.message;
-    statusEl.className = 'scrape-status err';
-  } finally {
-    runBtn.disabled = false;
-    runBtn.textContent = 'Scrape';
   }
+
+  updateStatus();
+
+  const promises = sites.map(async site => {
+    try {
+      const url = `${SCRAPE_API}/scrape?keyword=${encodeURIComponent(keyword)}&site=${encodeURIComponent(site)}&max_price=${maxPrice}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
+      if (!resp.ok) throw new Error(`${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      const items = data.items || [];
+      scrapeResults.push(...items);
+      // Re-number all results
+      scrapeResults.forEach((it, i) => { it.n = i + 1; });
+      state[site] = { done: true, count: items.length, err: '' };
+      renderScrapeGrid();
+    } catch (e) {
+      state[site] = { done: true, count: 0, err: e.message };
+    }
+    updateStatus();
+  });
+
+  await Promise.allSettled(promises);
+  runBtn.disabled = false;
+  runBtn.textContent = 'Scrape';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
