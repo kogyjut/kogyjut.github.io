@@ -639,6 +639,8 @@ async function submitBrosPost() {
       },
       timestamp: firebase.firestore.FieldValue.serverTimestamp(),
     });
+    btn.disabled = false;
+    btn.textContent = 'POST TO THE BROS';
     closeBrosModal();
   } catch (e) {
     console.error(e);
