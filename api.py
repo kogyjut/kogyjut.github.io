@@ -163,7 +163,6 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
 # ── Depop ──────────────────────────────────────────────────────────────────────
 
 async def scrape_depop(keyword: str, max_usd: float) -> list:
-    max_aud = round(max_usd * USD_TO_AUD)
     q = urllib.parse.quote_plus(keyword)
     url = f"https://www.depop.com/search/?q={q}"
     try:
@@ -176,28 +175,34 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
                 await page.wait_for_selector('a[href*="/products/"]', timeout=15000)
             except Exception:
                 pass
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             cards = await page.evaluate("""
                 () => {
-                    const anchors = Array.from(document.querySelectorAll('a[href*="/products/"]'));
                     const results = [];
                     const seen = new Set();
+
+                    // Depop wraps each product in an <a href="/products/..."> or a parent li/article
+                    // Walk every product anchor and climb up to find price + image
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/products/"]'));
                     for (const a of anchors) {
                         const href = a.getAttribute('href') || '';
                         if (!href || seen.has(href)) continue;
                         seen.add(href);
-                        let node = a;
+
+                        // Climb up to find a container that has both a price and an image
                         let price = '', img = '';
-                        for (let i = 0; i < 8; i++) {
+                        let node = a;
+                        for (let i = 0; i < 10; i++) {
                             if (!node) break;
-                            const els = Array.from(node.querySelectorAll('p,span'))
-                                .filter(s => s.textContent.includes('$') && s.textContent.trim().length < 15);
-                            if (els.length) {
-                                price = els[0].textContent.trim();
-                                const imgs = Array.from(node.querySelectorAll('img'));
-                                const main = imgs.find(i => (i.className || '').includes('mainImage')) || imgs[0];
-                                img = main ? (main.src || main.getAttribute('src') || '') : '';
+                            // Price: any leaf text node containing a currency symbol or digit pattern
+                            const priceEls = Array.from(node.querySelectorAll('p,span,div'))
+                                .filter(el => el.children.length === 0)
+                                .filter(el => /[\\$\\£\\€]|\\d+\\.\\d{2}/.test(el.textContent) && el.textContent.trim().length < 20);
+                            if (priceEls.length) {
+                                price = priceEls[0].textContent.trim();
+                                const imgEl = node.querySelector('img[src]');
+                                img = imgEl ? imgEl.src : '';
                                 break;
                             }
                             node = node.parentElement;
@@ -215,12 +220,14 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
     out = []
     for c in cards:
         try:
-            pm = re.search(r'[\d.]+', c["price"].replace(",", ""))
+            pm = re.search(r'[\d,]+(?:\.\d+)?', c["price"].replace(",", ""))
             if not pm:
                 continue
-            price_aud = float(pm.group())
-            if not price_aud or price_aud > max_aud:
+            # Render is US-based so Depop returns USD prices; convert to AUD
+            price_usd = float(pm.group())
+            if not price_usd or price_usd > max_usd:
                 continue
+            aud = round(price_usd * USD_TO_AUD)
             href = c["href"]
             slug = href.strip("/").split("/")[-1]
             parts = slug.split("-")
@@ -228,18 +235,97 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
             if inner and re.fullmatch(r'[0-9a-fA-F]{4,}', inner[-1]):
                 inner = inner[:-1]
             title = " ".join(inner).title() if inner else keyword.title()
+            url = f"https://www.depop.com{href}" if href.startswith("/") else href
             out.append({
                 "brand": "",
                 "item": title,
                 "desc": "",
                 "size": "Check listing",
+                "origPrice": f"USD {price_usd:.0f}",
+                "aud": aud,
+                "under": aud < 250,
+                "site": "Depop",
+                "url": url,
+                "rep": "auth",
+                "notes": "Live Depop listing",
+                "image": c["img"],
+            })
+        except Exception:
+            continue
+    return out[:12]
+
+
+# ── eBay AU ────────────────────────────────────────────────────────────────────
+
+async def scrape_ebay(keyword: str, max_usd: float) -> list:
+    max_aud = round(max_usd * USD_TO_AUD)
+    q = urllib.parse.quote_plus(keyword)
+    # Clothing category (11450), Buy It Now only, sort by lowest price
+    url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=11450&LH_BIN=1&_sop=15"
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+            ctx = await browser.new_context(user_agent=UA, locale="en-AU")
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_selector('li.s-item', timeout=15000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(2000)
+
+            cards = await page.evaluate("""
+                () => {
+                    const items = Array.from(document.querySelectorAll('li.s-item'));
+                    const results = [];
+                    for (const item of items) {
+                        const titleEl = item.querySelector('.s-item__title');
+                        // eBay injects a dummy "Shop on eBay" first card
+                        if (!titleEl || titleEl.textContent.trim() === 'Shop on eBay') continue;
+
+                        const priceEl = item.querySelector('.s-item__price');
+                        const linkEl = item.querySelector('a.s-item__link');
+                        const imgEl = item.querySelector('img.s-item__image-img, .s-item__image img');
+
+                        const title = titleEl ? titleEl.textContent.trim() : '';
+                        const price = priceEl ? priceEl.textContent.trim() : '';
+                        const href = linkEl ? linkEl.href : '';
+                        const img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
+
+                        if (title && price && href) results.push({ title, price, href, img });
+                    }
+                    return results;
+                }
+            """)
+            await browser.close()
+    except Exception as e:
+        print(f"eBay error: {e}")
+        return []
+
+    out = []
+    for c in cards:
+        try:
+            price_text = c["price"]
+            # Handle price ranges (e.g. "AU $10.00 to AU $50.00") — take lower bound
+            price_text = re.split(r'\s+to\s+|–', price_text)[0]
+            pm = re.search(r'[\d,]+(?:\.\d+)?', price_text.replace(",", ""))
+            if not pm:
+                continue
+            price_aud = float(pm.group())
+            if not price_aud or price_aud > max_aud:
+                continue
+            out.append({
+                "brand": "",
+                "item": c["title"],
+                "desc": "",
+                "size": "Check listing",
                 "origPrice": f"AUD {price_aud:.0f}",
                 "aud": round(price_aud),
                 "under": price_aud < 250,
-                "site": "Depop",
-                "url": f"https://www.depop.com{href}",
+                "site": "eBay AU",
+                "url": c["href"],
                 "rep": "auth",
-                "notes": "Live Depop listing",
+                "notes": "Live eBay AU listing",
                 "image": c["img"],
             })
         except Exception:
@@ -336,6 +422,7 @@ SCRAPERS = {
     "grailed": scrape_grailed,
     "depop": scrape_depop,
     "vinted": scrape_vinted,
+    "ebay": scrape_ebay,
 }
 
 
