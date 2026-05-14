@@ -260,64 +260,55 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
 
 # ── eBay AU ────────────────────────────────────────────────────────────────────
 
-async def scrape_ebay(keyword: str, max_usd: float) -> list:
+def _fetch_ebay(keyword: str, max_aud: float) -> list:
     """
-    eBay AU search results are server-rendered HTML — no JS needed.
-    Using plain requests avoids headless-browser bot detection entirely.
+    eBay AU search results are server-rendered HTML — plain requests avoids
+    headless-browser bot detection. Must warm up a session cookie first.
+    eBay now uses li.s-card / .s-card__title / .s-card__price (changed from li.s-item).
     """
-    max_aud = round(max_usd * USD_TO_AUD)
     q = urllib.parse.quote_plus(keyword)
     url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=0&_sop=15&_ipg=60"
-    headers = {
+    hdrs = {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-AU,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "max-age=0",
+        "Upgrade-Insecure-Requests": "1",
     }
-    try:
-        loop = asyncio.get_event_loop()
-        resp = await loop.run_in_executor(
-            None,
-            lambda: _requests.get(url, headers=headers, timeout=30, allow_redirects=True),
-        )
-        html = resp.text
-        print(f"eBay HTTP {resp.status_code}, {len(html)} chars")
-    except Exception as e:
-        print(f"eBay fetch error: {e}")
-        return []
-
-    soup = BeautifulSoup(html, "lxml")
-    items = soup.select("li.s-item")
-    print(f"eBay found {len(items)} li.s-item elements")
+    sess = _requests.Session()
+    sess.headers.update(hdrs)
+    sess.get("https://www.ebay.com.au/", timeout=15)  # warm up session cookie
+    resp = sess.get(url, timeout=30)
+    print(f"eBay HTTP {resp.status_code}, {len(resp.text)} chars")
+    soup = BeautifulSoup(resp.text, "lxml")
+    cards = soup.select("ul.srp-results li.s-card")
+    print(f"eBay s-card count: {len(cards)}")
 
     out = []
-    for item in items:
+    for card in cards:
         try:
-            title_el = item.select_one(".s-item__title")
+            title_el = card.select_one(".s-card__title")
             if not title_el:
                 continue
-            title = title_el.get_text(strip=True)
-            title = re.sub(r"^SPONSORED\s*", "", title, flags=re.IGNORECASE).strip()
-            if not title or "Shop on eBay" in title:
+            title = re.sub(r"Opens?\s+in\s+a\s+new.*", "", title_el.get_text(strip=True), flags=re.IGNORECASE).strip()
+            if not title:
                 continue
 
-            price_el = item.select_one(".s-item__price")
+            price_el = card.select_one(".s-card__price")
             if not price_el:
                 continue
-            price_text = price_el.get_text(strip=True)
-            # Take lower bound of price ranges ("AU $10.00 to AU $50.00")
-            price_text = re.split(r"\s+to\s+|–", price_text)[0]
+            price_text = re.split(r"\s+to\s+|–", price_el.get_text(strip=True))[0]
             pm = re.search(r"[\d,]+(?:\.\d+)?", price_text.replace(",", ""))
             if not pm:
                 continue
             price_aud = float(pm.group())
-            if not price_aud or price_aud > max_aud:
+            if price_aud < 1 or price_aud > max_aud:
                 continue
 
-            link_el = item.select_one("a.s-item__link")
+            link_el = card.select_one("a.s-card__link")
             href = link_el["href"] if link_el and link_el.get("href") else ""
-
-            img_el = item.select_one("img")
+            img_el = card.select_one("img")
             img = img_el.get("src", "") if img_el else ""
 
             out.append({
@@ -337,6 +328,16 @@ async def scrape_ebay(keyword: str, max_usd: float) -> list:
         except Exception:
             continue
     return out[:12]
+
+
+async def scrape_ebay(keyword: str, max_usd: float) -> list:
+    max_aud = round(max_usd * USD_TO_AUD)
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _fetch_ebay, keyword, max_aud)
+    except Exception as e:
+        print(f"eBay error: {e}")
+        return []
 
 
 # ── Vinted AU ──────────────────────────────────────────────────────────────────
@@ -427,61 +428,43 @@ async def scrape_vinted(keyword: str, max_usd: float) -> list:
 async def scrape_buyee(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
-    # translationType=1 auto-translates JP titles to English
     url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
             ctx = await browser.new_context(user_agent=UA, locale="en-US")
             page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_selector(
-                    'a[href*="/item/yahoo/auction/"], a[href*="/mercari/item/"]',
-                    timeout=15000,
-                )
-            except Exception:
-                pass
-            await page.wait_for_timeout(3000)
+            # networkidle ensures the React grid has fully rendered
+            await page.goto(url, wait_until="networkidle", timeout=60000)
+            await page.wait_for_timeout(2000)
 
+            # Buyee Yahoo JP items use /item/jdirectitems/auction/ (confirmed via inspection)
+            # Buyee Mercari items use /mercari/item/m…
             cards = await page.evaluate("""
                 () => {
                     const results = [];
                     const seen = new Set();
                     const anchors = Array.from(document.querySelectorAll(
-                        'a[href*="/item/yahoo/auction/"], a[href*="/mercari/item/"]'
+                        'a[href*="/item/jdirectitems/"], a[href*="/mercari/item/m"]'
                     ));
                     for (const a of anchors) {
                         const href = a.getAttribute('href') || a.href || '';
                         if (!href || seen.has(href)) continue;
                         seen.add(href);
-
-                        let price = '', img = '', title = '';
-                        let node = a;
-                        for (let i = 0; i < 10; i++) {
+                        let node = a, price = '', img = '', title = '';
+                        for (let i = 0; i < 12; i++) {
                             if (!node) break;
-                            // Yen price: look for ¥ symbol or large number (3+ digits with commas)
-                            const priceEls = Array.from(node.querySelectorAll('*'))
-                                .filter(el => el.children.length === 0)
-                                .filter(el => {
-                                    const t = el.textContent.trim();
-                                    return (t.includes('¥') || t.includes('￥') || /^[\d,]{3,}$/.test(t))
-                                        && t.length < 20;
-                                });
-                            if (priceEls.length) {
-                                price = priceEls[0].textContent.trim();
+                            const txt = node.innerText || '';
+                            const m = txt.match(/[¥￥][\d,]+|[\d,]{3,}円/);
+                            if (m) {
+                                price = m[0];
                                 const imgEl = node.querySelector('img[src]');
                                 img = imgEl ? imgEl.src : '';
-                                // Title: longest leaf text that isn't a price
-                                const titleEls = Array.from(node.querySelectorAll('*'))
-                                    .filter(el => el.children.length === 0)
-                                    .filter(el => {
-                                        const t = el.textContent.trim();
-                                        return t.length > 8 && t.length < 140
-                                            && !t.includes('¥') && !/^[\d,]+$/.test(t);
-                                    })
-                                    .sort((a, b) => b.textContent.length - a.textContent.length);
-                                title = titleEls.length ? titleEls[0].textContent.trim() : '';
+                                const lines = txt.split('\\n')
+                                    .map(l => l.trim())
+                                    .filter(l => l.length > 5 && l.length < 120
+                                        && !/[¥￥]/.test(l) && !/^[\d,]+$/.test(l));
+                                title = lines[0] || '';
                                 break;
                             }
                             node = node.parentElement;
@@ -496,6 +479,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
         print(f"Buyee error: {e}")
         return []
 
+    print(f"Buyee raw cards: {len(cards)}")
     out = []
     for c in cards:
         try:
@@ -508,7 +492,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             aud = round(price_jpy / JPY_PER_AUD)
             href = c["href"]
             item_url = f"https://buyee.jp{href}" if href.startswith("/") else href
-            source = "Buyee (Yahoo JP)" if "/yahoo/auction/" in href else "Buyee (Mercari JP)"
+            source = "Buyee (Mercari JP)" if "/mercari/" in href else "Buyee (Yahoo JP)"
             out.append({
                 "brand": "",
                 "item": c["title"] or keyword.title(),
@@ -533,7 +517,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
 async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
-    # Category 2084005 = Men's Fashion; sort by end time (sorder=1) to see active listings
+    # Men's Fashion category; sort by end time so active auctions come first
     url = f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1"
     try:
         async with async_playwright() as p:
@@ -542,7 +526,8 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
             page = await ctx.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             try:
-                await page.wait_for_selector('.Product, li[class*="Product"]', timeout=15000)
+                # Real link pattern confirmed via local testing: /jp/auction/
+                await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=12000)
             except Exception:
                 pass
             await page.wait_for_timeout(3000)
@@ -551,69 +536,31 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
                 () => {
                     const results = [];
                     const seen = new Set();
-
-                    // Yahoo Auctions JP uses .Product list items
-                    const items = Array.from(document.querySelectorAll(
-                        'li.Product, .Product__item, [class*="Product"][class*="item"], li[class*="product"]'
-                    ));
-
-                    for (const item of items) {
-                        const a = item.querySelector('a[href*="page.auctions.yahoo.co.jp"], a[href*="/jp/auction/"]')
-                               || item.querySelector('a[href]');
-                        if (!a) continue;
+                    // Yahoo Auctions JP confirmed link pattern: /jp/auction/{id}
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
+                    for (const a of anchors) {
                         const href = a.href || a.getAttribute('href') || '';
                         if (!href || seen.has(href)) continue;
                         seen.add(href);
-
-                        const titleEl = item.querySelector('.Product__title, [class*="title"], h3, h2');
-                        const priceEl = item.querySelector('.Product__priceValue, [class*="price"], .Price');
-                        const imgEl = item.querySelector('img[src]');
-
-                        const title = titleEl ? titleEl.textContent.trim() : '';
-                        const price = priceEl ? priceEl.textContent.trim() : '';
-                        const img = imgEl ? imgEl.src : '';
-
-                        if (price) results.push({ href, price, img, title });
-                    }
-
-                    // Fallback: walk all auction links
-                    if (results.length === 0) {
-                        const anchors = Array.from(document.querySelectorAll(
-                            'a[href*="page.auctions.yahoo.co.jp/jp/auction/"]'
-                        ));
-                        for (const a of anchors) {
-                            const href = a.href || '';
-                            if (!href || seen.has(href)) continue;
-                            seen.add(href);
-                            let price = '', img = '', title = '';
-                            let node = a;
-                            for (let i = 0; i < 10; i++) {
-                                if (!node) break;
-                                const priceEls = Array.from(node.querySelectorAll('*'))
-                                    .filter(el => el.children.length === 0)
-                                    .filter(el => {
-                                        const t = el.textContent.trim();
-                                        return (t.includes('円') || t.includes('¥') || /^[\d,]{3,}$/.test(t))
-                                            && t.length < 20;
-                                    });
-                                if (priceEls.length) {
-                                    price = priceEls[0].textContent.trim();
-                                    const imgEl = node.querySelector('img[src]');
-                                    img = imgEl ? imgEl.src : '';
-                                    const titleEls = Array.from(node.querySelectorAll('*'))
-                                        .filter(el => el.children.length === 0)
-                                        .filter(el => {
-                                            const t = el.textContent.trim();
-                                            return t.length > 5 && t.length < 140
-                                                && !t.includes('円') && !t.includes('¥') && !/^[\d,]+$/.test(t);
-                                        });
-                                    title = titleEls.length ? titleEls[0].textContent.trim() : '';
-                                    break;
-                                }
-                                node = node.parentElement;
+                        let node = a, price = '', img = '', title = '';
+                        for (let i = 0; i < 12; i++) {
+                            if (!node) break;
+                            const txt = node.innerText || '';
+                            const m = txt.match(/[¥￥][\d,]+|[\d,]{3,}円/);
+                            if (m) {
+                                price = m[0];
+                                const imgEl = node.querySelector('img[src]');
+                                img = imgEl ? imgEl.src : '';
+                                const lines = txt.split('\\n')
+                                    .map(l => l.trim())
+                                    .filter(l => l.length > 3 && l.length < 120
+                                        && !/[¥￥]/.test(l) && !/^[\d,]+$/.test(l));
+                                title = lines[0] || '';
+                                break;
                             }
-                            if (price) results.push({ href, price, img, title });
+                            node = node.parentElement;
                         }
+                        if (price) results.push({ href, price, img, title });
                     }
                     return results;
                 }
@@ -622,6 +569,8 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
     except Exception as e:
         print(f"Yahoo JP error: {e}")
         return []
+
+    print(f"Yahoo JP raw cards: {len(cards)}")
 
     out = []
     for c in cards:
