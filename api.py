@@ -494,8 +494,13 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
             ctx = await browser.new_context(user_agent=UA, locale="en-US")
             page = await ctx.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=60000)
-            await page.wait_for_timeout(2000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            # wait for item cards to appear instead of networkidle (Buyee never goes idle)
+            try:
+                await page.wait_for_selector('a[href*="/item/"]', timeout=20000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(4000)
 
             cards = await page.evaluate("""
                 () => {
@@ -574,59 +579,73 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
 
 # ── Yahoo Auctions Japan ───────────────────────────────────────────────────────
 
+async def _yahoo_fetch_url(url: str) -> list:
+    """Run one Yahoo JP Playwright fetch, return raw card dicts."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+        ctx = await browser.new_context(user_agent=UA, locale="en-US")
+        page = await ctx.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        try:
+            await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=15000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(4000)
+        cards = await page.evaluate("""
+            () => {
+                const results = [], seen = new Set();
+                const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
+                for (const a of anchors) {
+                    const href = a.href || a.getAttribute('href') || '';
+                    if (!href || seen.has(href)) continue;
+                    seen.add(href);
+                    let node = a, price = '', img = '', title = '';
+                    for (let i = 0; i < 12; i++) {
+                        if (!node) break;
+                        const txt = node.innerText || '';
+                        const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
+                        if (m) {
+                            price = m[0];
+                            const imgEl = node.querySelector('img[src]');
+                            img = imgEl ? imgEl.src : '';
+                            const lines = txt.split('\\n')
+                                .map(l => l.trim())
+                                .filter(l => l.length > 3 && l.length < 120
+                                    && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
+                            title = lines[0] || '';
+                            break;
+                        }
+                        node = node.parentElement;
+                    }
+                    if (price) results.push({ href, price, img, title });
+                }
+                return results;
+            }
+        """)
+        await browser.close()
+    return cards
+
+
 async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
-    url = f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1"
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-            ctx = await browser.new_context(user_agent=UA, locale="en-US")
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=12000)
-            except Exception:
-                pass
-            await page.wait_for_timeout(3000)
 
-            cards = await page.evaluate("""
-                () => {
-                    const results = [], seen = new Set();
-                    const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
-                    for (const a of anchors) {
-                        const href = a.href || a.getAttribute('href') || '';
-                        if (!href || seen.has(href)) continue;
-                        seen.add(href);
-                        let node = a, price = '', img = '', title = '';
-                        for (let i = 0; i < 12; i++) {
-                            if (!node) break;
-                            const txt = node.innerText || '';
-                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
-                            if (m) {
-                                price = m[0];
-                                const imgEl = node.querySelector('img[src]');
-                                img = imgEl ? imgEl.src : '';
-                                const lines = txt.split('\\n')
-                                    .map(l => l.trim())
-                                    .filter(l => l.length > 3 && l.length < 120
-                                        && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
-                                title = lines[0] || '';
-                                break;
-                            }
-                            node = node.parentElement;
-                        }
-                        if (price) results.push({ href, price, img, title });
-                    }
-                    return results;
-                }
-            """)
-            await browser.close()
-    except Exception as e:
-        print(f"Yahoo JP error: {e}")
-        return []
+    # try Men's Fashion category first, fall back to all categories
+    urls_to_try = [
+        f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1",
+        f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&sorder=1",
+    ]
 
-    print(f"Yahoo JP raw cards: {len(cards)}")
+    cards = []
+    for url in urls_to_try:
+        try:
+            cards = await _yahoo_fetch_url(url)
+            print(f"Yahoo JP raw cards: {len(cards)} from {url}")
+            if cards:
+                break
+        except Exception as e:
+            print(f"Yahoo JP error ({url}): {e}")
+
     out = []
     for c in cards:
         try:
@@ -639,10 +658,10 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
             aud = round(price_jpy / JPY_PER_AUD)
             href = c["href"]
             auction_id_m = re.search(r'/auction/([a-zA-Z0-9]+)', href)
-            if auction_id_m:
-                item_url = f"https://buyee.jp/item/yahoo/auction/{auction_id_m.group(1)}"
-            else:
-                item_url = href
+            item_url = (
+                f"https://buyee.jp/item/yahoo/auction/{auction_id_m.group(1)}"
+                if auction_id_m else href
+            )
             out.append({
                 "brand": "",
                 "item": c["title"] or keyword.title(),
