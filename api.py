@@ -69,24 +69,29 @@ def _fetch_grailed(keyword: str, max_usd: float) -> list:
     Grailed uses Algolia for search. Query it directly — no browser needed.
     Public search-only key embedded in their JS bundle.
     """
-    url = "https://mnrwefss2q-dsn.algolia.net/1/indexes/Listing_production/query"
+    url = "https://mnrwefss2q-dsn.algolia.net/1/indexes/*/queries"
     headers = {
         "X-Algolia-Application-Id": "MNRWEFSS2Q",
-        "X-Algolia-API-Key": "a6a08f984a9c1f9e8a65e4e5a264bc64",
+        "X-Algolia-API-Key": "c89dbaddf15fe70e1941a109bf7c2a3d",
         "Content-Type": "application/json",
         "Referer": "https://www.grailed.com/",
         "Origin": "https://www.grailed.com",
     }
     body = {
-        "query": keyword,
-        "hitsPerPage": 24,
-        "attributesToRetrieve": ["id","title","designer","price","size","cover_photo","category_path"],
-        "filters": f"price_i <= {int(max_usd * 100)}",
+        "requests": [{
+            "indexName": "Listing_production",
+            "params": urllib.parse.urlencode({
+                "query": keyword,
+                "hitsPerPage": 24,
+                "attributesToRetrieve": "id,title,designer,price,size,cover_photo",
+                "numericFilters": f"price_i<={int(max_usd * 100)}",
+            })
+        }]
     }
     try:
         resp = _requests.post(url, json=body, headers=headers, timeout=15)
         resp.raise_for_status()
-        hits = resp.json().get("hits", [])
+        hits = (resp.json().get("results") or [{}])[0].get("hits", [])
     except Exception as e:
         print(f"Grailed Algolia error: {e}")
         hits = []
