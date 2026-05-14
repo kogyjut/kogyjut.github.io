@@ -20,6 +20,7 @@ app.add_middleware(
 
 WALL_FILE = Path("wall.json")
 USD_TO_AUD = 1.55
+JPY_PER_AUD = 98  # 1 AUD ≈ 98 yen
 
 
 def _load_wall():
@@ -416,6 +417,244 @@ async def scrape_vinted(keyword: str, max_usd: float) -> list:
     return out[:12]
 
 
+# ── Buyee ──────────────────────────────────────────────────────────────────────
+
+async def scrape_buyee(keyword: str, max_usd: float) -> list:
+    max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
+    q = urllib.parse.quote_plus(keyword)
+    # translationType=1 auto-translates JP titles to English
+    url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+            ctx = await browser.new_context(user_agent=UA, locale="en-US")
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_selector(
+                    'a[href*="/item/yahoo/auction/"], a[href*="/mercari/item/"]',
+                    timeout=15000,
+                )
+            except Exception:
+                pass
+            await page.wait_for_timeout(3000)
+
+            cards = await page.evaluate("""
+                () => {
+                    const results = [];
+                    const seen = new Set();
+                    const anchors = Array.from(document.querySelectorAll(
+                        'a[href*="/item/yahoo/auction/"], a[href*="/mercari/item/"]'
+                    ));
+                    for (const a of anchors) {
+                        const href = a.getAttribute('href') || a.href || '';
+                        if (!href || seen.has(href)) continue;
+                        seen.add(href);
+
+                        let price = '', img = '', title = '';
+                        let node = a;
+                        for (let i = 0; i < 10; i++) {
+                            if (!node) break;
+                            // Yen price: look for ¥ symbol or large number (3+ digits with commas)
+                            const priceEls = Array.from(node.querySelectorAll('*'))
+                                .filter(el => el.children.length === 0)
+                                .filter(el => {
+                                    const t = el.textContent.trim();
+                                    return (t.includes('¥') || t.includes('￥') || /^[\d,]{3,}$/.test(t))
+                                        && t.length < 20;
+                                });
+                            if (priceEls.length) {
+                                price = priceEls[0].textContent.trim();
+                                const imgEl = node.querySelector('img[src]');
+                                img = imgEl ? imgEl.src : '';
+                                // Title: longest leaf text that isn't a price
+                                const titleEls = Array.from(node.querySelectorAll('*'))
+                                    .filter(el => el.children.length === 0)
+                                    .filter(el => {
+                                        const t = el.textContent.trim();
+                                        return t.length > 8 && t.length < 140
+                                            && !t.includes('¥') && !/^[\d,]+$/.test(t);
+                                    })
+                                    .sort((a, b) => b.textContent.length - a.textContent.length);
+                                title = titleEls.length ? titleEls[0].textContent.trim() : '';
+                                break;
+                            }
+                            node = node.parentElement;
+                        }
+                        if (price) results.push({ href, price, img, title });
+                    }
+                    return results;
+                }
+            """)
+            await browser.close()
+    except Exception as e:
+        print(f"Buyee error: {e}")
+        return []
+
+    out = []
+    for c in cards:
+        try:
+            pm = re.search(r'[\d,]+', c["price"].replace(",", ""))
+            if not pm:
+                continue
+            price_jpy = float(pm.group())
+            if not price_jpy or price_jpy > max_jpy:
+                continue
+            aud = round(price_jpy / JPY_PER_AUD)
+            href = c["href"]
+            item_url = f"https://buyee.jp{href}" if href.startswith("/") else href
+            source = "Buyee (Yahoo JP)" if "/yahoo/auction/" in href else "Buyee (Mercari JP)"
+            out.append({
+                "brand": "",
+                "item": c["title"] or keyword.title(),
+                "desc": "",
+                "size": "Check listing",
+                "origPrice": f"¥{price_jpy:,.0f}",
+                "aud": aud,
+                "under": aud < 250,
+                "site": source,
+                "url": item_url,
+                "rep": "auth",
+                "notes": f"¥{price_jpy:,.0f} JPY (~AUD {aud}). Buy via Buyee proxy (+5-10% commission). JP sizing — ask seller for measurements.",
+                "image": c["img"],
+            })
+        except Exception:
+            continue
+    return out[:12]
+
+
+# ── Yahoo Auctions Japan ───────────────────────────────────────────────────────
+
+async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
+    max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
+    q = urllib.parse.quote_plus(keyword)
+    # Category 2084005 = Men's Fashion; sort by end time (sorder=1) to see active listings
+    url = f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1"
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+            ctx = await browser.new_context(user_agent=UA, locale="en-US")
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_selector('.Product, li[class*="Product"]', timeout=15000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(3000)
+
+            cards = await page.evaluate("""
+                () => {
+                    const results = [];
+                    const seen = new Set();
+
+                    // Yahoo Auctions JP uses .Product list items
+                    const items = Array.from(document.querySelectorAll(
+                        'li.Product, .Product__item, [class*="Product"][class*="item"], li[class*="product"]'
+                    ));
+
+                    for (const item of items) {
+                        const a = item.querySelector('a[href*="page.auctions.yahoo.co.jp"], a[href*="/jp/auction/"]')
+                               || item.querySelector('a[href]');
+                        if (!a) continue;
+                        const href = a.href || a.getAttribute('href') || '';
+                        if (!href || seen.has(href)) continue;
+                        seen.add(href);
+
+                        const titleEl = item.querySelector('.Product__title, [class*="title"], h3, h2');
+                        const priceEl = item.querySelector('.Product__priceValue, [class*="price"], .Price');
+                        const imgEl = item.querySelector('img[src]');
+
+                        const title = titleEl ? titleEl.textContent.trim() : '';
+                        const price = priceEl ? priceEl.textContent.trim() : '';
+                        const img = imgEl ? imgEl.src : '';
+
+                        if (price) results.push({ href, price, img, title });
+                    }
+
+                    // Fallback: walk all auction links
+                    if (results.length === 0) {
+                        const anchors = Array.from(document.querySelectorAll(
+                            'a[href*="page.auctions.yahoo.co.jp/jp/auction/"]'
+                        ));
+                        for (const a of anchors) {
+                            const href = a.href || '';
+                            if (!href || seen.has(href)) continue;
+                            seen.add(href);
+                            let price = '', img = '', title = '';
+                            let node = a;
+                            for (let i = 0; i < 10; i++) {
+                                if (!node) break;
+                                const priceEls = Array.from(node.querySelectorAll('*'))
+                                    .filter(el => el.children.length === 0)
+                                    .filter(el => {
+                                        const t = el.textContent.trim();
+                                        return (t.includes('円') || t.includes('¥') || /^[\d,]{3,}$/.test(t))
+                                            && t.length < 20;
+                                    });
+                                if (priceEls.length) {
+                                    price = priceEls[0].textContent.trim();
+                                    const imgEl = node.querySelector('img[src]');
+                                    img = imgEl ? imgEl.src : '';
+                                    const titleEls = Array.from(node.querySelectorAll('*'))
+                                        .filter(el => el.children.length === 0)
+                                        .filter(el => {
+                                            const t = el.textContent.trim();
+                                            return t.length > 5 && t.length < 140
+                                                && !t.includes('円') && !t.includes('¥') && !/^[\d,]+$/.test(t);
+                                        });
+                                    title = titleEls.length ? titleEls[0].textContent.trim() : '';
+                                    break;
+                                }
+                                node = node.parentElement;
+                            }
+                            if (price) results.push({ href, price, img, title });
+                        }
+                    }
+                    return results;
+                }
+            """)
+            await browser.close()
+    except Exception as e:
+        print(f"Yahoo JP error: {e}")
+        return []
+
+    out = []
+    for c in cards:
+        try:
+            # Price can be "12,345円", "¥12,345", or just "12345"
+            pm = re.search(r'[\d,]+', c["price"].replace(",", ""))
+            if not pm:
+                continue
+            price_jpy = float(pm.group())
+            if not price_jpy or price_jpy > max_jpy:
+                continue
+            aud = round(price_jpy / JPY_PER_AUD)
+            href = c["href"]
+            # Build Buyee proxy URL from the Yahoo auction ID so the user can actually bid
+            auction_id_m = re.search(r'/auction/([a-zA-Z0-9]+)', href)
+            if auction_id_m:
+                item_url = f"https://buyee.jp/item/yahoo/auction/{auction_id_m.group(1)}"
+            else:
+                item_url = href
+            out.append({
+                "brand": "",
+                "item": c["title"] or keyword.title(),
+                "desc": "",
+                "size": "Check listing",
+                "origPrice": f"¥{price_jpy:,.0f}",
+                "aud": aud,
+                "under": aud < 250,
+                "site": "Yahoo Auctions JP",
+                "url": item_url,
+                "rep": "auth",
+                "notes": f"¥{price_jpy:,.0f} JPY (~AUD {aud}). Link goes to Buyee proxy. JP sizing — ask seller for measurements.",
+                "image": c["img"],
+            })
+        except Exception:
+            continue
+    return out[:12]
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 SCRAPERS = {
@@ -423,6 +662,8 @@ SCRAPERS = {
     "depop": scrape_depop,
     "vinted": scrape_vinted,
     "ebay": scrape_ebay,
+    "buyee": scrape_buyee,
+    "yahoo_jp": scrape_yahoo_jp,
 }
 
 
