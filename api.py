@@ -267,7 +267,9 @@ def _fetch_ebay(keyword: str, max_aud: float) -> list:
     eBay now uses li.s-card / .s-card__title / .s-card__price (changed from li.s-item).
     """
     q = urllib.parse.quote_plus(keyword)
-    url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=0&_sop=15&_ipg=60"
+    # _sacat=1059 = Men's Clothing on eBay AU (parent 11450 uses a different layout)
+    # Fall back to all categories if clothing search returns nothing
+    url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=1059&_sop=15&_ipg=60"
     hdrs = {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -280,10 +282,16 @@ def _fetch_ebay(keyword: str, max_aud: float) -> list:
     sess.headers.update(hdrs)
     sess.get("https://www.ebay.com.au/", timeout=15)  # warm up session cookie
     resp = sess.get(url, timeout=30)
-    print(f"eBay HTTP {resp.status_code}, {len(resp.text)} chars")
     soup = BeautifulSoup(resp.text, "lxml")
     cards = soup.select("ul.srp-results li.s-card")
-    print(f"eBay s-card count: {len(cards)}")
+    print(f"eBay clothing cat: {len(cards)} cards")
+    # If Men's Clothing returns nothing, retry across all categories
+    if not cards:
+        fallback = url.replace("_sacat=1059", "_sacat=0")
+        resp = sess.get(fallback, timeout=30)
+        soup = BeautifulSoup(resp.text, "lxml")
+        cards = soup.select("ul.srp-results li.s-card")
+        print(f"eBay all-cat fallback: {len(cards)} cards")
 
     out = []
     for card in cards:
