@@ -224,42 +224,49 @@ async def _grailed_playwright(keyword: str, max_usd: float) -> list:
     return out[:12]
 
 
-# ── Depop — JSON API (no Playwright) ──────────────────────────────────────────
+# ── Depop — JSON API then Playwright fallback ─────────────────────────────────
+
+def _depop_parse_price(price_info: dict) -> float:
+    """Handle Depop's inconsistent price formats (cents vs full units)."""
+    raw = price_info.get("amountRevised") or price_info.get("amount") or "0"
+    val = float(str(raw).replace(",", ""))
+    # Depop sometimes returns cents (2500 = $25), sometimes full (25.00 = $25)
+    # Heuristic: if value > 500 and no decimal point in raw string, treat as cents
+    if val > 500 and "." not in str(raw):
+        val = val / 100
+    return val
+
 
 def _fetch_depop(keyword: str, max_usd: float) -> list:
-    """Depop has a public search API that returns JSON."""
     q = urllib.parse.quote_plus(keyword)
     url = f"https://webapi.depop.com/api/v2/search/products/?q={q}&country=au&currency=AUD&numberOfResults=24&itemsPerPage=24"
     headers = {
         "User-Agent": UA,
-        "Accept": "application/json",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-AU,en;q=0.9",
-        "Referer": "https://www.depop.com/",
+        "Referer": f"https://www.depop.com/search/?q={q}",
         "Origin": "https://www.depop.com",
+        "depop-session-id": uuid.uuid4().hex,
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
     }
     try:
         resp = _requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
+        print(f"Depop API status: {resp.status_code}")
+        if resp.status_code != 200:
+            return []
         products = resp.json().get("products", [])
     except Exception as e:
         print(f"Depop API error: {e}")
-        products = []
+        return []
 
     out = []
     for p in products:
         try:
-            # Depop API prices are in minor units (cents for AUD)
             price_info = p.get("price") or {}
-            price_str = price_info.get("amountRevised") or price_info.get("amount") or "0"
-            price_aud = float(str(price_str).replace(",", "")) / 100
-            if not price_aud:
-                # try national price
-                nat = p.get("nationalShippingCost") or {}
-                price_aud = float(str(price_info.get("amount", 0)).replace(",", "")) / 100
-            if price_aud <= 0:
-                continue
-            price_usd = price_aud / USD_TO_AUD
-            if price_usd > max_usd:
+            price_aud = _depop_parse_price(price_info)
+            if price_aud <= 0 or (price_aud / USD_TO_AUD) > max_usd:
                 continue
             slug = p.get("slug") or ""
             pid = p.get("id") or ""
@@ -292,7 +299,6 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
     results = await loop.run_in_executor(None, _fetch_depop, keyword, max_usd)
     if results:
         return results
-    # Playwright fallback
     return await _depop_playwright(keyword, max_usd)
 
 
@@ -301,15 +307,23 @@ async def _depop_playwright(keyword: str, max_usd: float) -> list:
     url = f"https://www.depop.com/search/?q={q}"
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-            ctx = await browser.new_context(user_agent=UA, locale="en-US")
+            browser = await p.chromium.launch(
+                headless=True,
+                args=BROWSER_ARGS + ["--disable-blink-features=AutomationControlled"],
+            )
+            ctx = await browser.new_context(user_agent=UA, locale="en-AU")
+            # hide webdriver flag so Depop doesn't detect headless Chrome
+            await ctx.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+                "window.chrome={runtime:{}};"
+            )
             page = await ctx.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             try:
-                await page.wait_for_selector('a[href*="/products/"]', timeout=15000)
+                await page.wait_for_selector('a[href*="/products/"]', timeout=20000)
             except Exception:
                 pass
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(4000)
 
             cards = await page.evaluate("""
                 () => {
@@ -324,7 +338,7 @@ async def _depop_playwright(keyword: str, max_usd: float) -> list:
                             if (!node) break;
                             const priceEls = Array.from(node.querySelectorAll('p,span,div'))
                                 .filter(el => el.children.length === 0)
-                                .filter(el => /[\\$\\£\\€]|\\d+\\.\\d{2}/.test(el.textContent) && el.textContent.trim().length < 20);
+                                .filter(el => /[\\$\\£\\€A]|\\d+\\.\\d{2}/.test(el.textContent) && el.textContent.trim().length < 20);
                             if (priceEls.length) {
                                 price = priceEls[0].textContent.trim();
                                 const imgEl = node.querySelector('img[src]');
