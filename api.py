@@ -12,19 +12,6 @@ from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
 
-# ── Keyword relevance helpers ──────────────────────────────────────────────────
-
-_STOP = {"a","an","the","and","or","for","in","on","at","to","of","is","it","its","with","by","from","s"}
-
-def _kw_words(keyword: str) -> list:
-    return [w for w in keyword.lower().split() if w not in _STOP and len(w) >= 3]
-
-def _relevant(title: str, kw_words: list) -> bool:
-    if not kw_words:
-        return True
-    t = title.lower()
-    return any(w in t for w in kw_words)
-
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +23,30 @@ app.add_middleware(
 WALL_FILE = Path("wall.json")
 USD_TO_AUD = 1.55
 JPY_PER_AUD = 98  # 1 AUD ≈ 98 yen
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+BROWSER_ARGS = [
+    "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+    "--disable-gpu", "--no-first-run", "--no-zygote", "--single-process",
+]
+
+# ── eBay keyword filter (only used there to cut noise) ─────────────────────────
+
+_STOP = {"a","an","the","and","or","for","in","on","at","to","of","is","it","its","with","by","from","s"}
+
+def _kw_words(keyword: str) -> list:
+    return [w for w in keyword.lower().split() if w not in _STOP and len(w) >= 3]
+
+def _relevant(title: str, kw_words: list) -> bool:
+    if not kw_words:
+        return True
+    t = title.lower()
+    return any(w in t for w in kw_words)
 
 
 def _load_wall():
@@ -51,50 +62,79 @@ def _save_wall(data):
     WALL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ── Browser helpers ────────────────────────────────────────────────────────────
+# ── Grailed — Algolia API (no Playwright, much more reliable) ──────────────────
 
-BROWSER_ARGS = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-    "--no-first-run",
-    "--no-zygote",
-    "--single-process",
-]
-
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
-
-async def _pw_get(url: str, wait_selector: str | None = None) -> tuple:
+def _fetch_grailed(keyword: str, max_usd: float) -> list:
     """
-    Returns (page_content_html, pw_page) — caller must close the browser.
-    Actually returns raw extracted data via JS to avoid keeping browser open long.
+    Grailed uses Algolia for search. Query it directly — no browser needed.
+    Public search-only key embedded in their JS bundle.
     """
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-        ctx = await browser.new_context(user_agent=UA, locale="en-US")
-        page = await ctx.new_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        if wait_selector:
-            try:
-                await page.wait_for_selector(wait_selector, timeout=15000)
-            except Exception:
-                pass
-        else:
-            await page.wait_for_timeout(3000)
-        html = await page.content()
-        await browser.close()
-    return html
+    url = "https://mnrwefss2q-dsn.algolia.net/1/indexes/Listing_production/query"
+    headers = {
+        "X-Algolia-Application-Id": "MNRWEFSS2Q",
+        "X-Algolia-API-Key": "a6a08f984a9c1f9e8a65e4e5a264bc64",
+        "Content-Type": "application/json",
+        "Referer": "https://www.grailed.com/",
+        "Origin": "https://www.grailed.com",
+    }
+    body = {
+        "query": keyword,
+        "hitsPerPage": 24,
+        "attributesToRetrieve": ["id","title","designer","price","size","cover_photo","category_path"],
+        "filters": f"price_i <= {int(max_usd * 100)}",
+    }
+    try:
+        resp = _requests.post(url, json=body, headers=headers, timeout=15)
+        resp.raise_for_status()
+        hits = resp.json().get("hits", [])
+    except Exception as e:
+        print(f"Grailed Algolia error: {e}")
+        hits = []
 
+    out = []
+    for h in hits:
+        try:
+            price_cents = h.get("price_i") or (h.get("price", 0) * 100)
+            price_usd = price_cents / 100
+            if price_usd <= 0 or price_usd > max_usd:
+                continue
+            aud = round(price_usd * USD_TO_AUD)
+            designer = (h.get("designer") or {})
+            brand = designer.get("name") or keyword.title()
+            listing_id = h.get("id") or h.get("objectID", "")
+            photo = ""
+            cover = h.get("cover_photo") or {}
+            if cover:
+                photo = cover.get("url") or cover.get("thumb") or ""
+            out.append({
+                "brand": brand,
+                "item": (h.get("title") or "").strip() or keyword.title(),
+                "desc": "",
+                "size": h.get("size") or "Check listing",
+                "origPrice": f"USD {price_usd:.0f}",
+                "aud": aud,
+                "under": aud < 250,
+                "site": "Grailed",
+                "url": f"https://www.grailed.com/listings/{listing_id}",
+                "rep": "auth",
+                "notes": "Live Grailed listing",
+                "image": photo,
+            })
+        except Exception:
+            continue
+    return out[:12]
 
-# ── Grailed ────────────────────────────────────────────────────────────────────
 
 async def scrape_grailed(keyword: str, max_usd: float) -> list:
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, _fetch_grailed, keyword, max_usd)
+    if results:
+        return results
+    # Playwright fallback if Algolia fails
+    return await _grailed_playwright(keyword, max_usd)
+
+
+async def _grailed_playwright(keyword: str, max_usd: float) -> list:
     slug = urllib.parse.quote_plus(keyword)
     url = f"https://www.grailed.com/shop?query={slug}"
     try:
@@ -107,7 +147,7 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
                 await page.wait_for_selector('a[href*="/listings/"]', timeout=15000)
             except Exception:
                 pass
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             cards = await page.evaluate("""
                 () => {
@@ -119,8 +159,7 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
                         const m = href.match(/\\/listings\\/(\\d+)/);
                         if (!m || seen.has(m[1])) continue;
                         seen.add(m[1]);
-                        let node = a;
-                        let price = '', img = '', title = '';
+                        let node = a, price = '', img = '', title = '';
                         for (let i = 0; i < 8; i++) {
                             if (!node) break;
                             const spans = Array.from(node.querySelectorAll('span'))
@@ -129,9 +168,8 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
                                 price = spans[0].textContent.trim();
                                 const imgEl = node.querySelector('img');
                                 img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
-                                // get real title text from p/h tags near the card
                                 const titleEl = node.querySelector('p,h3,h4,[class*="title"],[class*="Title"]');
-                                title = titleEl ? titleEl.textContent.trim() : (a.textContent.trim().split('\\n')[0] || '');
+                                title = titleEl ? titleEl.textContent.trim() : '';
                                 break;
                             }
                             node = node.parentElement;
@@ -143,10 +181,9 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
             """)
             await browser.close()
     except Exception as e:
-        print(f"Grailed error: {e}")
+        print(f"Grailed Playwright fallback error: {e}")
         return []
 
-    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -157,13 +194,10 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
             if price_usd > max_usd:
                 continue
             aud = round(price_usd * USD_TO_AUD)
-            # prefer DOM title, fall back to URL slug
             dom_title = (c.get("title") or "").strip()
             slug_match = re.search(r'/listings/\d+-(.+?)(?:\?|$)', c["href"])
             slug_title = slug_match.group(1).replace("-", " ").title() if slug_match else ""
             title = dom_title or slug_title or keyword.title()
-            if not _relevant(title, kw_words):
-                continue
             raw_img = c["img"].rstrip("?")
             img_url = (raw_img + "?w=640") if raw_img and "?" not in raw_img else raw_img
             out.append({
@@ -185,9 +219,79 @@ async def scrape_grailed(keyword: str, max_usd: float) -> list:
     return out[:12]
 
 
-# ── Depop ──────────────────────────────────────────────────────────────────────
+# ── Depop — JSON API (no Playwright) ──────────────────────────────────────────
+
+def _fetch_depop(keyword: str, max_usd: float) -> list:
+    """Depop has a public search API that returns JSON."""
+    q = urllib.parse.quote_plus(keyword)
+    url = f"https://webapi.depop.com/api/v2/search/products/?q={q}&country=au&currency=AUD&numberOfResults=24&itemsPerPage=24"
+    headers = {
+        "User-Agent": UA,
+        "Accept": "application/json",
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Referer": "https://www.depop.com/",
+        "Origin": "https://www.depop.com",
+    }
+    try:
+        resp = _requests.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        products = resp.json().get("products", [])
+    except Exception as e:
+        print(f"Depop API error: {e}")
+        products = []
+
+    out = []
+    for p in products:
+        try:
+            # Depop API prices are in minor units (cents for AUD)
+            price_info = p.get("price") or {}
+            price_str = price_info.get("amountRevised") or price_info.get("amount") or "0"
+            price_aud = float(str(price_str).replace(",", "")) / 100
+            if not price_aud:
+                # try national price
+                nat = p.get("nationalShippingCost") or {}
+                price_aud = float(str(price_info.get("amount", 0)).replace(",", "")) / 100
+            if price_aud <= 0:
+                continue
+            price_usd = price_aud / USD_TO_AUD
+            if price_usd > max_usd:
+                continue
+            slug = p.get("slug") or ""
+            pid = p.get("id") or ""
+            preview = (p.get("previews") or [{}])[0]
+            img = preview.get("src") or preview.get("url") or ""
+            title = p.get("description") or slug.replace("-", " ").title() or keyword.title()
+            if len(title) > 80:
+                title = title[:77] + "…"
+            out.append({
+                "brand": "",
+                "item": title,
+                "desc": "",
+                "size": (p.get("sizes") or [{}])[0].get("label") or "Check listing",
+                "origPrice": f"AUD {price_aud:.0f}",
+                "aud": round(price_aud),
+                "under": price_aud < 250,
+                "site": "Depop",
+                "url": f"https://www.depop.com/products/{slug or pid}/",
+                "rep": "auth",
+                "notes": "Live Depop listing",
+                "image": img,
+            })
+        except Exception:
+            continue
+    return out[:12]
+
 
 async def scrape_depop(keyword: str, max_usd: float) -> list:
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, _fetch_depop, keyword, max_usd)
+    if results:
+        return results
+    # Playwright fallback
+    return await _depop_playwright(keyword, max_usd)
+
+
+async def _depop_playwright(keyword: str, max_usd: float) -> list:
     q = urllib.parse.quote_plus(keyword)
     url = f"https://www.depop.com/search/?q={q}"
     try:
@@ -204,23 +308,15 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
 
             cards = await page.evaluate("""
                 () => {
-                    const results = [];
-                    const seen = new Set();
-
-                    // Depop wraps each product in an <a href="/products/..."> or a parent li/article
-                    // Walk every product anchor and climb up to find price + image
+                    const results = [], seen = new Set();
                     const anchors = Array.from(document.querySelectorAll('a[href*="/products/"]'));
                     for (const a of anchors) {
                         const href = a.getAttribute('href') || '';
                         if (!href || seen.has(href)) continue;
                         seen.add(href);
-
-                        // Climb up to find a container that has both a price and an image
-                        let price = '', img = '';
-                        let node = a;
+                        let price = '', img = '', node = a;
                         for (let i = 0; i < 10; i++) {
                             if (!node) break;
-                            // Price: any leaf text node containing a currency symbol or digit pattern
                             const priceEls = Array.from(node.querySelectorAll('p,span,div'))
                                 .filter(el => el.children.length === 0)
                                 .filter(el => /[\\$\\£\\€]|\\d+\\.\\d{2}/.test(el.textContent) && el.textContent.trim().length < 20);
@@ -239,17 +335,15 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
             """)
             await browser.close()
     except Exception as e:
-        print(f"Depop error: {e}")
+        print(f"Depop Playwright error: {e}")
         return []
 
-    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
             pm = re.search(r'[\d,]+(?:\.\d+)?', c["price"].replace(",", ""))
             if not pm:
                 continue
-            # Render is US-based so Depop returns USD prices; convert to AUD
             price_usd = float(pm.group())
             if not price_usd or price_usd > max_usd:
                 continue
@@ -261,8 +355,6 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
             if inner and re.fullmatch(r'[0-9a-fA-F]{4,}', inner[-1]):
                 inner = inner[:-1]
             title = " ".join(inner).title() if inner else keyword.title()
-            if not _relevant(title, kw_words):
-                continue
             url = f"https://www.depop.com{href}" if href.startswith("/") else href
             out.append({
                 "brand": "",
@@ -283,40 +375,31 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
     return out[:12]
 
 
-# ── eBay AU ────────────────────────────────────────────────────────────────────
+# ── eBay AU — requests + BeautifulSoup ────────────────────────────────────────
 
-def _parse_ebay_cards(cards, soup, max_aud: float, keyword: str) -> list:
-    """Try multiple eBay markup patterns and return parsed items."""
+def _parse_ebay_soup(soup, max_aud: float, keyword: str) -> list:
     kw_words = _kw_words(keyword)
 
-    # Selector sets: (card_sel, title_sel, price_sel, link_sel)
+    # Try selector sets in order until one yields results
     SELECTOR_SETS = [
-        # Current eBay AU markup (li.s-item is the standard)
         ("ul.srp-results li.s-item:not(.s-item--large)", ".s-item__title", ".s-item__price", "a.s-item__link"),
-        # Alternate card class seen on some eBay pages
         ("ul.srp-results li.s-card", ".s-card__title", ".s-card__price", "a.s-card__link"),
-        # Broader fallback
         (".srp-results li[class*='s-item']", "[class*='title']", "[class*='price']", "a[href*='ebay.com']"),
     ]
 
-    out = []
-    tried_cards = cards  # start with whatever was pre-selected
-    tried_sel_idx = -1
-
-    for sel_idx, (card_sel, title_sel, price_sel, link_sel) in enumerate(SELECTOR_SETS):
-        if not tried_cards:
-            tried_cards = soup.select(card_sel)
-            print(f"eBay selector set {sel_idx}: {len(tried_cards)} cards")
-        if not tried_cards:
+    for card_sel, title_sel, price_sel, link_sel in SELECTOR_SETS:
+        cards = soup.select(card_sel)
+        if not cards:
             continue
-
-        for card in tried_cards:
+        print(f"eBay: {len(cards)} cards with '{card_sel}'")
+        out = []
+        for card in cards:
             try:
                 title_el = card.select_one(title_sel)
                 if not title_el:
                     continue
                 title = re.sub(r"Opens?\s+in\s+a\s+new.*", "", title_el.get_text(strip=True), flags=re.IGNORECASE).strip()
-                if not title or title.lower() == "shop on ebay":
+                if not title or title.lower() in ("shop on ebay", ""):
                     continue
                 if not _relevant(title, kw_words):
                     continue
@@ -324,7 +407,7 @@ def _parse_ebay_cards(cards, soup, max_aud: float, keyword: str) -> list:
                 price_el = card.select_one(price_sel)
                 if not price_el:
                     continue
-                price_text = re.split(r"\s+to\s+|–|-", price_el.get_text(strip=True))[0]
+                price_text = re.split(r"\s+to\s+|–", price_el.get_text(strip=True))[0]
                 pm = re.search(r"[\d,]+(?:\.\d+)?", price_text.replace(",", ""))
                 if not pm:
                     continue
@@ -335,7 +418,7 @@ def _parse_ebay_cards(cards, soup, max_aud: float, keyword: str) -> list:
                 link_el = card.select_one(link_sel) or card.select_one("a[href]")
                 href = link_el["href"] if link_el and link_el.get("href") else ""
                 img_el = card.select_one("img")
-                img = img_el.get("src", "") or img_el.get("data-src", "") if img_el else ""
+                img = (img_el.get("src") or img_el.get("data-src", "")) if img_el else ""
 
                 out.append({
                     "brand": "",
@@ -353,20 +436,13 @@ def _parse_ebay_cards(cards, soup, max_aud: float, keyword: str) -> list:
                 })
             except Exception:
                 continue
-
         if out:
-            break
-        tried_cards = []  # reset so next iteration tries its own selector
+            return out[:12]
 
-    return out[:12]
+    return []
 
 
 def _fetch_ebay(keyword: str, max_aud: float) -> list:
-    """
-    eBay AU search results are server-rendered HTML — plain requests avoids
-    headless-browser bot detection. Tries Men's Clothing category first,
-    falls back to all categories if empty, then tries broader selectors.
-    """
     q = urllib.parse.quote_plus(keyword)
     hdrs = {
         "User-Agent": UA,
@@ -379,120 +455,32 @@ def _fetch_ebay(keyword: str, max_aud: float) -> list:
     sess = _requests.Session()
     sess.headers.update(hdrs)
     try:
-        sess.get("https://www.ebay.com.au/", timeout=15)  # warm up session cookie
+        sess.get("https://www.ebay.com.au/", timeout=15)
     except Exception:
         pass
 
-    # Try Men's Clothing (1059) first, fall back to all categories (0)
     for sacat in ["1059", "0"]:
         url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat={sacat}&_sop=15&_ipg=60"
         try:
             resp = sess.get(url, timeout=30)
             soup = BeautifulSoup(resp.text, "lxml")
-            # Try the standard s-item selector first for count reporting
-            cards = soup.select("ul.srp-results li.s-item:not(.s-item--large)")
-            print(f"eBay sacat={sacat}: {len(cards)} s-item cards")
-            result = _parse_ebay_cards(cards, soup, max_aud, keyword)
+            result = _parse_ebay_soup(soup, max_aud, keyword)
             if result:
                 return result
         except Exception as e:
             print(f"eBay sacat={sacat} error: {e}")
-            continue
 
     return []
 
 
 async def scrape_ebay(keyword: str, max_usd: float) -> list:
     max_aud = round(max_usd * USD_TO_AUD)
+    loop = asyncio.get_event_loop()
     try:
-        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _fetch_ebay, keyword, max_aud)
     except Exception as e:
         print(f"eBay error: {e}")
         return []
-
-
-# ── Vinted AU ──────────────────────────────────────────────────────────────────
-
-async def scrape_vinted(keyword: str, max_usd: float) -> list:
-    max_aud = round(max_usd * USD_TO_AUD)
-    q = urllib.parse.quote_plus(keyword)
-    url = f"https://www.vinted.com.au/catalog?search_text={q}"
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-            ctx = await browser.new_context(user_agent=UA, locale="en-US")
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_selector('a[href*="/items/"]', timeout=15000)
-            except Exception:
-                pass
-            await page.wait_for_timeout(2000)
-
-            cards = await page.evaluate("""
-                () => {
-                    const anchors = Array.from(document.querySelectorAll('a[href*="/items/"]'));
-                    const results = [];
-                    const seen = new Set();
-                    for (const a of anchors) {
-                        const href = a.getAttribute('href') || a.href || '';
-                        if (!href || seen.has(href)) continue;
-                        seen.add(href);
-                        let node = a;
-                        let price = '', img = '', title = '';
-                        for (let i = 0; i < 8; i++) {
-                            if (!node) break;
-                            const els = Array.from(node.querySelectorAll('p,span'))
-                                .filter(s => s.textContent.includes('$') && s.textContent.trim().length < 15);
-                            if (els.length) {
-                                price = els[0].textContent.trim();
-                                const imgEl = node.querySelector('img');
-                                img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
-                                const titleEls = Array.from(node.querySelectorAll('p,span,h3'))
-                                    .filter(s => !s.textContent.includes('$') && s.textContent.trim().length > 3 && s.textContent.trim().length < 80);
-                                title = titleEls.length ? titleEls[0].textContent.trim() : '';
-                                break;
-                            }
-                            node = node.parentElement;
-                        }
-                        results.push({ href, price, img, title });
-                    }
-                    return results;
-                }
-            """)
-            await browser.close()
-    except Exception as e:
-        print(f"Vinted error: {e}")
-        return []
-
-    out = []
-    for c in cards:
-        try:
-            pm = re.search(r'[\d.]+', c["price"].replace(",", ""))
-            if not pm:
-                continue
-            price_aud = float(pm.group())
-            if not price_aud or price_aud > max_aud:
-                continue
-            href = c["href"]
-            out.append({
-                "brand": "",
-                "item": c["title"] or keyword.title(),
-                "desc": "",
-                "size": "Check listing",
-                "origPrice": f"AUD {price_aud:.0f}",
-                "aud": round(price_aud),
-                "under": price_aud < 250,
-                "site": "Vinted",
-                "url": f"https://www.vinted.com.au{href}" if href.startswith("/") else href,
-                "rep": "auth",
-                "notes": "Live Vinted listing",
-                "image": c["img"],
-            })
-        except Exception:
-            continue
-    return out[:12]
 
 
 # ── Buyee ──────────────────────────────────────────────────────────────────────
@@ -506,21 +494,15 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
             ctx = await browser.new_context(user_agent=UA, locale="en-US")
             page = await ctx.new_page()
-            # networkidle ensures the React grid has fully rendered
             await page.goto(url, wait_until="networkidle", timeout=60000)
             await page.wait_for_timeout(2000)
 
-            # Buyee Yahoo JP items use /item/jdirectitems/auction/ (confirmed via inspection)
-            # Buyee Mercari items use /mercari/item/m…
-            # Broader fallback: any /item/ link on buyee.jp
             cards = await page.evaluate("""
                 () => {
-                    const results = [];
-                    const seen = new Set();
+                    const results = [], seen = new Set();
                     let anchors = Array.from(document.querySelectorAll(
                         'a[href*="/item/jdirectitems/"], a[href*="/mercari/item/m"]'
                     ));
-                    // fallback to any buyee item link if specific selectors return nothing
                     if (anchors.length === 0) {
                         anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
                             .filter(a => a.href && !a.href.includes('/search/') && !a.href.includes('/category/'));
@@ -533,7 +515,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
                         for (let i = 0; i < 12; i++) {
                             if (!node) break;
                             const txt = node.innerText || '';
-                            const m = txt.match(/[¥￥][\d,]+|[\d,]{3,}円/);
+                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
                             if (m) {
                                 price = m[0];
                                 const imgEl = node.querySelector('img[src]');
@@ -541,7 +523,7 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
                                 const lines = txt.split('\\n')
                                     .map(l => l.trim())
                                     .filter(l => l.length > 5 && l.length < 120
-                                        && !/[¥￥]/.test(l) && !/^[\d,]+$/.test(l));
+                                        && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
                                 title = lines[0] || '';
                                 break;
                             }
@@ -558,7 +540,6 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
         return []
 
     print(f"Buyee raw cards: {len(cards)}")
-    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
@@ -569,15 +550,12 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             if not price_jpy or price_jpy > max_jpy:
                 continue
             aud = round(price_jpy / JPY_PER_AUD)
-            title = c["title"] or keyword.title()
-            if not _relevant(title, kw_words):
-                continue
             href = c["href"]
             item_url = f"https://buyee.jp{href}" if href.startswith("/") else href
             source = "Buyee (Mercari JP)" if "/mercari/" in href else "Buyee (Yahoo JP)"
             out.append({
                 "brand": "",
-                "item": title,
+                "item": c["title"] or keyword.title(),
                 "desc": "",
                 "size": "Check listing",
                 "origPrice": f"¥{price_jpy:,.0f}",
@@ -599,7 +577,6 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
 async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
-    # Men's Fashion category; sort by end time so active auctions come first
     url = f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1"
     try:
         async with async_playwright() as p:
@@ -608,7 +585,6 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
             page = await ctx.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             try:
-                # Real link pattern confirmed via local testing: /jp/auction/
                 await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=12000)
             except Exception:
                 pass
@@ -616,9 +592,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
 
             cards = await page.evaluate("""
                 () => {
-                    const results = [];
-                    const seen = new Set();
-                    // Yahoo Auctions JP confirmed link pattern: /jp/auction/{id}
+                    const results = [], seen = new Set();
                     const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
                     for (const a of anchors) {
                         const href = a.href || a.getAttribute('href') || '';
@@ -628,7 +602,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
                         for (let i = 0; i < 12; i++) {
                             if (!node) break;
                             const txt = node.innerText || '';
-                            const m = txt.match(/[¥￥][\d,]+|[\d,]{3,}円/);
+                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
                             if (m) {
                                 price = m[0];
                                 const imgEl = node.querySelector('img[src]');
@@ -636,7 +610,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
                                 const lines = txt.split('\\n')
                                     .map(l => l.trim())
                                     .filter(l => l.length > 3 && l.length < 120
-                                        && !/[¥￥]/.test(l) && !/^[\d,]+$/.test(l));
+                                        && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
                                 title = lines[0] || '';
                                 break;
                             }
@@ -653,11 +627,9 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
         return []
 
     print(f"Yahoo JP raw cards: {len(cards)}")
-    kw_words = _kw_words(keyword)
     out = []
     for c in cards:
         try:
-            # Price can be "12,345円", "¥12,345", or just "12345"
             pm = re.search(r'[\d,]+', c["price"].replace(",", ""))
             if not pm:
                 continue
@@ -665,11 +637,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
             if not price_jpy or price_jpy > max_jpy:
                 continue
             aud = round(price_jpy / JPY_PER_AUD)
-            title = c["title"] or keyword.title()
-            if not _relevant(title, kw_words):
-                continue
             href = c["href"]
-            # Build Buyee proxy URL from the Yahoo auction ID so the user can actually bid
             auction_id_m = re.search(r'/auction/([a-zA-Z0-9]+)', href)
             if auction_id_m:
                 item_url = f"https://buyee.jp/item/yahoo/auction/{auction_id_m.group(1)}"
@@ -677,7 +645,7 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
                 item_url = href
             out.append({
                 "brand": "",
-                "item": title,
+                "item": c["title"] or keyword.title(),
                 "desc": "",
                 "size": "Check listing",
                 "origPrice": f"¥{price_jpy:,.0f}",
@@ -697,12 +665,11 @@ async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 SCRAPERS = {
-    "grailed": scrape_grailed,
-    "depop": scrape_depop,
-    "vinted": scrape_vinted,
-    "ebay": scrape_ebay,
-    "buyee": scrape_buyee,
-    "yahoo_jp": scrape_yahoo_jp,
+    "grailed":   scrape_grailed,
+    "depop":     scrape_depop,
+    "ebay":      scrape_ebay,
+    "buyee":     scrape_buyee,
+    "yahoo_jp":  scrape_yahoo_jp,
 }
 
 
