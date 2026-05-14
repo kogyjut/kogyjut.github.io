@@ -6,6 +6,8 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
+import requests as _requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
@@ -259,118 +261,78 @@ async def scrape_depop(keyword: str, max_usd: float) -> list:
 # ── eBay AU ────────────────────────────────────────────────────────────────────
 
 async def scrape_ebay(keyword: str, max_usd: float) -> list:
+    """
+    eBay AU search results are server-rendered HTML — no JS needed.
+    Using plain requests avoids headless-browser bot detection entirely.
+    """
     max_aud = round(max_usd * USD_TO_AUD)
     q = urllib.parse.quote_plus(keyword)
-    # All categories, all listing types, sort by lowest price, 60 results per page
     url = f"https://www.ebay.com.au/sch/i.html?_nkw={q}&_sacat=0&_sop=15&_ipg=60"
+    headers = {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-            ctx = await browser.new_context(user_agent=UA, locale="en-AU")
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-
-            # Try multiple selectors — eBay has changed their markup a few times
-            for sel in ["li.s-item", "[data-testid='item-card']", ".srp-results li"]:
-                try:
-                    await page.wait_for_selector(sel, timeout=8000)
-                    break
-                except Exception:
-                    pass
-            await page.wait_for_timeout(3000)
-
-            page_title = await page.title()
-            print(f"eBay page title: {page_title}")
-
-            cards = await page.evaluate("""
-                () => {
-                    const results = [];
-                    const seen = new Set();
-
-                    // Primary: standard li.s-item structure
-                    const items = Array.from(document.querySelectorAll('li.s-item'));
-                    for (const item of items) {
-                        const titleEl = item.querySelector('.s-item__title');
-                        if (!titleEl) continue;
-                        const titleText = titleEl.textContent.trim();
-                        if (titleText === 'Shop on eBay' || titleText === '') continue;
-
-                        const priceEl = item.querySelector('.s-item__price');
-                        const linkEl = item.querySelector('a.s-item__link, a[href*="ebay.com.au"]');
-                        const imgEl = item.querySelector('img');
-
-                        const price = priceEl ? priceEl.textContent.trim() : '';
-                        const href = linkEl ? (linkEl.href || linkEl.getAttribute('href') || '') : '';
-                        const img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
-
-                        if (titleText && price && href && !seen.has(href)) {
-                            seen.add(href);
-                            results.push({ title: titleText, price, href, img });
-                        }
-                    }
-
-                    // Fallback: any element with a price near an ebay product link
-                    if (results.length === 0) {
-                        const anchors = Array.from(document.querySelectorAll(
-                            'a[href*="/itm/"], a[href*="ebay.com.au/itm"]'
-                        ));
-                        for (const a of anchors) {
-                            const href = a.href || '';
-                            if (!href || seen.has(href)) continue;
-                            seen.add(href);
-                            let price = '', img = '', title = a.textContent.trim().slice(0, 120);
-                            let node = a;
-                            for (let i = 0; i < 8; i++) {
-                                if (!node) break;
-                                const priceEl = Array.from(node.querySelectorAll('*'))
-                                    .filter(el => el.children.length === 0)
-                                    .filter(el => /AU\s*\$[\d,.]/.test(el.textContent) && el.textContent.trim().length < 20)[0];
-                                if (priceEl) {
-                                    price = priceEl.textContent.trim();
-                                    const imgEl = node.querySelector('img[src]');
-                                    img = imgEl ? imgEl.src : '';
-                                    break;
-                                }
-                                node = node.parentElement;
-                            }
-                            if (price) results.push({ title, price, href, img });
-                        }
-                    }
-
-                    return results;
-                }
-            """)
-            await browser.close()
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _requests.get(url, headers=headers, timeout=30, allow_redirects=True),
+        )
+        html = resp.text
+        print(f"eBay HTTP {resp.status_code}, {len(html)} chars")
     except Exception as e:
-        print(f"eBay error: {e}")
+        print(f"eBay fetch error: {e}")
         return []
 
-    print(f"eBay raw cards: {len(cards)}")
+    soup = BeautifulSoup(html, "lxml")
+    items = soup.select("li.s-item")
+    print(f"eBay found {len(items)} li.s-item elements")
+
     out = []
-    for c in cards:
+    for item in items:
         try:
-            price_text = c["price"]
-            # Handle price ranges — take the lower bound
-            price_text = re.split(r'\s+to\s+|–|-(?=\s*AU)', price_text)[0]
-            pm = re.search(r'[\d,]+(?:\.\d+)?', price_text.replace(",", ""))
+            title_el = item.select_one(".s-item__title")
+            if not title_el:
+                continue
+            title = title_el.get_text(strip=True)
+            title = re.sub(r"^SPONSORED\s*", "", title, flags=re.IGNORECASE).strip()
+            if not title or "Shop on eBay" in title:
+                continue
+
+            price_el = item.select_one(".s-item__price")
+            if not price_el:
+                continue
+            price_text = price_el.get_text(strip=True)
+            # Take lower bound of price ranges ("AU $10.00 to AU $50.00")
+            price_text = re.split(r"\s+to\s+|–", price_text)[0]
+            pm = re.search(r"[\d,]+(?:\.\d+)?", price_text.replace(",", ""))
             if not pm:
                 continue
             price_aud = float(pm.group())
             if not price_aud or price_aud > max_aud:
                 continue
+
+            link_el = item.select_one("a.s-item__link")
+            href = link_el["href"] if link_el and link_el.get("href") else ""
+
+            img_el = item.select_one("img")
+            img = img_el.get("src", "") if img_el else ""
+
             out.append({
                 "brand": "",
-                "item": c["title"],
+                "item": title,
                 "desc": "",
                 "size": "Check listing",
                 "origPrice": f"AUD {price_aud:.0f}",
                 "aud": round(price_aud),
                 "under": price_aud < 250,
                 "site": "eBay AU",
-                "url": c["href"],
+                "url": href,
                 "rep": "auth",
                 "notes": "Live eBay AU listing",
-                "image": c["img"],
+                "image": img,
             })
         except Exception:
             continue

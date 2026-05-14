@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 requests
 playwright
+beautifulsoup4
+lxml
