@@ -239,20 +239,33 @@ def _depop_parse_price(price_info: dict) -> float:
 
 def _fetch_depop(keyword: str, max_usd: float) -> list:
     q = urllib.parse.quote_plus(keyword)
+    sess = _requests.Session()
+    sess.headers.update({
+        "User-Agent": UA,
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    })
+    # Seed session cookies so the API doesn't block us
+    try:
+        sess.get("https://www.depop.com/", timeout=15)
+    except Exception:
+        pass
+
     url = f"https://webapi.depop.com/api/v2/search/products/?q={q}&country=au&currency=AUD&numberOfResults=24&itemsPerPage=24"
     headers = {
-        "User-Agent": UA,
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-AU,en;q=0.9",
         "Referer": f"https://www.depop.com/search/?q={q}",
         "Origin": "https://www.depop.com",
         "depop-session-id": uuid.uuid4().hex,
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
     }
     try:
-        resp = _requests.get(url, headers=headers, timeout=20)
+        resp = sess.get(url, headers=headers, timeout=20)
         print(f"Depop API status: {resp.status_code}")
         if resp.status_code != 200:
             return []
@@ -510,8 +523,15 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
     url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=BROWSER_ARGS + ["--disable-blink-features=AutomationControlled"],
+            )
             ctx = await browser.new_context(user_agent=UA, locale="en-US")
+            await ctx.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+                "window.chrome={runtime:{}};"
+            )
             page = await ctx.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             # wait for item cards to appear instead of networkidle (Buyee never goes idle)
@@ -645,10 +665,93 @@ async def _yahoo_fetch_url(url: str) -> list:
     return cards
 
 
+def _fetch_yahoo_jp_requests(keyword: str, max_jpy: float) -> list:
+    """Fast requests+BS4 approach for Yahoo JP (server-rendered HTML)."""
+    q = urllib.parse.quote_plus(keyword)
+    hdrs = {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
+    urls_to_try = [
+        f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1",
+        f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&sorder=1",
+    ]
+    for url in urls_to_try:
+        try:
+            resp = _requests.get(url, headers=hdrs, timeout=20)
+            if resp.status_code != 200:
+                continue
+            soup = BeautifulSoup(resp.text, "lxml")
+            out = []
+            # Yahoo JP renders items as <li class="Product"> or similar
+            for sel in ["li.Product", "li[class*='Product']", ".Product"]:
+                items = soup.select(sel)
+                if not items:
+                    continue
+                for item in items:
+                    try:
+                        link = item.select_one('a[href*="/jp/auction/"]')
+                        if not link:
+                            continue
+                        href = link.get("href", "")
+                        title_el = item.select_one('[class*="title" i], [class*="Title" i], h3, h4, p')
+                        title = title_el.get_text(strip=True) if title_el else keyword.title()
+                        title = title[:80]
+                        price_el = item.select_one('[class*="price" i], [class*="Price" i], [class*="bid" i]')
+                        if not price_el:
+                            continue
+                        price_text = price_el.get_text(strip=True)
+                        pm = re.search(r"[\d,]+", price_text.replace(",", ""))
+                        if not pm:
+                            continue
+                        price_jpy = float(pm.group())
+                        if not price_jpy or price_jpy > max_jpy:
+                            continue
+                        img_el = item.select_one("img")
+                        img = (img_el.get("src") or img_el.get("data-src", "")) if img_el else ""
+                        aud = round(price_jpy / JPY_PER_AUD)
+                        auction_id_m = re.search(r"/auction/([a-zA-Z0-9]+)", href)
+                        item_url = (
+                            f"https://buyee.jp/item/yahoo/auction/{auction_id_m.group(1)}"
+                            if auction_id_m else href
+                        )
+                        out.append({
+                            "brand": "",
+                            "item": title or keyword.title(),
+                            "desc": "",
+                            "size": "Check listing",
+                            "origPrice": f"¥{price_jpy:,.0f}",
+                            "aud": aud,
+                            "under": aud < 250,
+                            "site": "Yahoo Auctions JP",
+                            "url": item_url,
+                            "rep": "auth",
+                            "notes": f"¥{price_jpy:,.0f} JPY (~AUD {aud}). Link goes to Buyee proxy. JP sizing — ask seller for measurements.",
+                            "image": img,
+                        })
+                    except Exception:
+                        continue
+                if out:
+                    print(f"Yahoo JP requests: {len(out)} items from {url}")
+                    return out[:12]
+        except Exception as e:
+            print(f"Yahoo JP requests error ({url}): {e}")
+    return []
+
+
 async def scrape_yahoo_jp(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
 
+    # Try fast requests approach first
+    loop = asyncio.get_event_loop()
+    fast_results = await loop.run_in_executor(None, _fetch_yahoo_jp_requests, keyword, max_jpy)
+    if fast_results:
+        return fast_results
+
+    print("Yahoo JP: falling back to Playwright")
     # try Men's Fashion category first, fall back to all categories
     urls_to_try = [
         f"https://auctions.yahoo.co.jp/search/search?p={q}&ei=UTF-8&auccat=2084005&sorder=1",
