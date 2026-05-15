@@ -491,7 +491,7 @@ function randomKw() {
 (function buildSuggestions() {
   const container = document.getElementById('kwSuggestions');
   // Show a rotating subset of 14 + the random button so it doesn't overflow
-  const subset = [...KW_SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 14);
+  const subset = [...KW_SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 20);
   subset.forEach(kw => {
     const btn = document.createElement('button');
     btn.className = 'kw-chip';
