@@ -124,6 +124,38 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   margin-right:6px; vertical-align:middle;
 }
 
+/* ── Priority List ─────────────────────────────────────────────────────────── */
+.priority-list { display:flex; flex-direction:column; gap:5px; margin-bottom:14px; }
+.priority-label {
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.07em;
+  color:#888; font-weight:600; margin-bottom:6px;
+}
+.priority-item {
+  display:flex; align-items:center; gap:9px;
+  padding:9px 12px; background:#f7f7f7; border:1.5px solid #e5e5e5;
+  border-radius:8px; cursor:grab; user-select:none;
+  transition:background .1s, border-color .1s, box-shadow .1s;
+}
+.priority-item:active { cursor:grabbing; }
+.priority-item.dragging { opacity:.35; background:#fff; }
+.priority-item.drag-over { background:#eff3ff; border-color:#4a80f5; box-shadow:0 0 0 2px rgba(74,128,245,.15); }
+.drag-handle { color:#ccc; font-size:18px; line-height:1; flex-shrink:0; cursor:grab; }
+.rank-num {
+  font-size:11px; font-weight:800; color:#fff; background:#111;
+  border-radius:999px; width:20px; height:20px; display:flex;
+  align-items:center; justify-content:center; flex-shrink:0;
+}
+.priority-item:nth-child(1) .rank-num { background:#b41e1e; }
+.priority-item:nth-child(2) .rank-num { background:#444; }
+.priority-site-name { font-size:13px; font-weight:600; flex:1; }
+.priority-site-desc { font-size:11px; color:#999; }
+.rank-arrows { display:flex; flex-direction:column; gap:1px; flex-shrink:0; }
+.rank-arrows button {
+  background:none; border:1px solid #e0e0e0; border-radius:4px;
+  font-size:10px; line-height:1; padding:2px 5px; cursor:pointer; color:#888;
+}
+.rank-arrows button:hover { background:#111; color:#fff; border-color:#111; }
+
 /* ── Keyword Suggestions ───────────────────────────────────────────────────── */
 .kw-suggestions {
   display:flex; flex-wrap:wrap; gap:7px; align-items:center;
@@ -328,13 +360,45 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
     <span class="kw-label">Try:</span>
   </div>
 
-  <div class="site-chips">
-    <span style="font-size:11px;color:#888;align-self:center;margin-right:2px;">Sites:</span>
-    <span class="chip active" data-site="grailed" onclick="toggleSite(this)">Grailed</span>
-    <span class="chip" data-site="depop" onclick="toggleSite(this)">Depop</span>
-    <span class="chip" data-site="ebay" onclick="toggleSite(this)">eBay AU</span>
-    <span class="chip" data-site="buyee" onclick="toggleSite(this)">Buyee (JP)</span>
-    <span class="chip" data-site="yahoo_jp" onclick="toggleSite(this)">Yahoo Auctions JP</span>
+  <div>
+    <div class="priority-label">Site Priority — drag to rank (top = searched first, results shown first)</div>
+    <div class="priority-list" id="priorityList">
+      <div class="priority-item" data-site="grailed" draggable="true">
+        <span class="drag-handle">⠿</span>
+        <span class="rank-num">1</span>
+        <span class="priority-site-name">Grailed</span>
+        <span class="priority-site-desc">Western archive</span>
+        <div class="rank-arrows"><button onclick="rankUp(this)">▲</button><button onclick="rankDown(this)">▼</button></div>
+      </div>
+      <div class="priority-item" data-site="depop" draggable="true">
+        <span class="drag-handle">⠿</span>
+        <span class="rank-num">2</span>
+        <span class="priority-site-name">Depop</span>
+        <span class="priority-site-desc">Streetwear &amp; archive</span>
+        <div class="rank-arrows"><button onclick="rankUp(this)">▲</button><button onclick="rankDown(this)">▼</button></div>
+      </div>
+      <div class="priority-item" data-site="ebay" draggable="true">
+        <span class="drag-handle">⠿</span>
+        <span class="rank-num">3</span>
+        <span class="priority-site-name">eBay AU</span>
+        <span class="priority-site-desc">Local deals</span>
+        <div class="rank-arrows"><button onclick="rankUp(this)">▲</button><button onclick="rankDown(this)">▼</button></div>
+      </div>
+      <div class="priority-item" data-site="buyee" draggable="true">
+        <span class="drag-handle">⠿</span>
+        <span class="rank-num">4</span>
+        <span class="priority-site-name">Buyee (JP)</span>
+        <span class="priority-site-desc">Mercari JP + Yahoo JP proxy</span>
+        <div class="rank-arrows"><button onclick="rankUp(this)">▲</button><button onclick="rankDown(this)">▼</button></div>
+      </div>
+      <div class="priority-item" data-site="yahoo_jp" draggable="true">
+        <span class="drag-handle">⠿</span>
+        <span class="rank-num">5</span>
+        <span class="priority-site-name">Yahoo Auctions JP</span>
+        <span class="priority-site-desc">Direct JP auction</span>
+        <div class="rank-arrows"><button onclick="rankUp(this)">▲</button><button onclick="rankDown(this)">▼</button></div>
+      </div>
+    </div>
   </div>
 
   <div class="scrape-filter-row" style="margin-bottom:14px;">
@@ -532,7 +596,11 @@ function setSFilter(el) {
 function renderScrapeGrid() {
   const grid = document.getElementById('scrapeGrid');
   if (!scrapeResults.length) { grid.innerHTML = ''; return; }
-  const filtered = scrapeResults.filter(it =>
+  const priority = getPrioritySites();
+  const sorted = [...scrapeResults].sort((a, b) => {
+    return priority.indexOf(a._siteKey) - priority.indexOf(b._siteKey);
+  });
+  const filtered = sorted.filter(it =>
     scrapeFilter === 'all' ||
     (scrapeFilter === 'auth' && it.rep === 'auth') ||
     (scrapeFilter === 'under250' && it.under)
@@ -542,14 +610,67 @@ function renderScrapeGrid() {
     : '<div class="loading" style="padding:30px">No results match that filter.</div>';
 }
 
-function toggleSite(el) {
-  el.classList.toggle('active');
+// ── Priority List — drag & drop + arrow buttons ───────────────────────────────
+(function initPriority() {
+  const list = document.getElementById('priorityList');
+  let dragSrc = null;
+
+  list.addEventListener('dragstart', e => {
+    dragSrc = e.target.closest('.priority-item');
+    if (!dragSrc) return;
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => dragSrc.classList.add('dragging'), 0);
+  });
+  list.addEventListener('dragend', () => {
+    list.querySelectorAll('.priority-item').forEach(el => {
+      el.classList.remove('dragging', 'drag-over');
+    });
+    refreshRanks();
+  });
+  list.addEventListener('dragover', e => {
+    e.preventDefault();
+    const target = e.target.closest('.priority-item');
+    if (!target || target === dragSrc) return;
+    list.querySelectorAll('.priority-item').forEach(el => el.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+    const items = [...list.querySelectorAll('.priority-item')];
+    const srcIdx = items.indexOf(dragSrc);
+    const tgtIdx = items.indexOf(target);
+    if (srcIdx < tgtIdx) list.insertBefore(dragSrc, target.nextSibling);
+    else list.insertBefore(dragSrc, target);
+  });
+  list.addEventListener('dragleave', e => {
+    const target = e.target.closest('.priority-item');
+    if (target) target.classList.remove('drag-over');
+  });
+  list.addEventListener('drop', e => { e.preventDefault(); });
+})();
+
+function refreshRanks() {
+  document.querySelectorAll('#priorityList .priority-item').forEach((el, i) => {
+    el.querySelector('.rank-num').textContent = i + 1;
+  });
+}
+
+function rankUp(btn) {
+  const item = btn.closest('.priority-item');
+  const prev = item.previousElementSibling;
+  if (prev) { item.parentNode.insertBefore(item, prev); refreshRanks(); }
+}
+function rankDown(btn) {
+  const item = btn.closest('.priority-item');
+  const next = item.nextElementSibling;
+  if (next) { item.parentNode.insertBefore(next, item); refreshRanks(); }
+}
+
+function getPrioritySites() {
+  return [...document.querySelectorAll('#priorityList .priority-item')].map(el => el.dataset.site);
 }
 
 async function runScrape() {
   const keyword = document.getElementById('scrapeKeyword').value.trim();
   const maxPrice = parseInt(document.getElementById('scrapeMaxPrice').value) || 500;
-  const selectedSites = Array.from(document.querySelectorAll('.site-chips .chip.active')).map(el => el.dataset.site);
+  const selectedSites = getPrioritySites();
   const statusEl = document.getElementById('scrapeStatus');
   const runBtn = document.getElementById('runBtn');
 
@@ -611,6 +732,7 @@ async function runScrape() {
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
       const its = data.items || [];
+      its.forEach(it => { it._siteKey = site; });
       scrapeResults.push(...its);
       scrapeResults.forEach((it, i) => { it.n = i + 1; });
       siteState[site] = { done: true, count: its.length, err: '' };
@@ -625,13 +747,7 @@ async function runScrape() {
   statusBar(selectedSites, '');
   await Promise.allSettled(selectedSites.map(s => fetchSite(s, selectedSites, '')));
 
-  // Auto-fallback: if < 3 results, automatically try any sites that weren't selected
-  const fallbackSites = ALL_SITES.filter(s => !selectedSites.includes(s));
-  if (scrapeResults.length < 3 && fallbackSites.length) {
-    const allActive = [...selectedSites, ...fallbackSites];
-    fallbackSites.forEach(s => { siteState[s] = { done: false, count: 0, err: '' }; });
-    await Promise.allSettled(fallbackSites.map(s => fetchSite(s, allActive, 'auto-expanding search')));
-  }
+  // All sites are always scraped (ranked, not toggled), so no auto-fallback needed
 
   statusBar(Object.keys(siteState), '');
   runBtn.disabled = false;
