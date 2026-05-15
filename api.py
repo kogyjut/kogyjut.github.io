@@ -517,9 +517,78 @@ async def scrape_ebay(keyword: str, max_usd: float) -> list:
 
 # ── Buyee ──────────────────────────────────────────────────────────────────────
 
+def _fetch_buyee_requests(keyword: str, max_jpy: float) -> list:
+    """Fast requests+BS4 attempt before Playwright."""
+    q = urllib.parse.quote_plus(keyword)
+    url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
+    hdrs = {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
+    try:
+        resp = _requests.get(url, headers=hdrs, timeout=20)
+        if resp.status_code != 200:
+            return []
+        soup = BeautifulSoup(resp.text, "lxml")
+        out = []
+        # Buyee renders item cards server-side as .itemCard or .js-item
+        for sel in [".itemCard", ".js-item", "[class*='itemCard']", "[class*='item-card']"]:
+            cards = soup.select(sel)
+            if not cards:
+                continue
+            for card in cards:
+                try:
+                    link = card.select_one('a[href*="/item/"]')
+                    if not link:
+                        continue
+                    href = link.get("href", "")
+                    price_el = card.select_one('[class*="price" i], [class*="Price" i]')
+                    if not price_el:
+                        continue
+                    price_text = price_el.get_text(strip=True)
+                    pm = re.search(r"[\d,]+", price_text.replace(",", ""))
+                    if not pm:
+                        continue
+                    price_jpy = float(pm.group())
+                    if not price_jpy or price_jpy > max_jpy:
+                        continue
+                    img_el = card.select_one("img")
+                    img = (img_el.get("src") or img_el.get("data-src", "")) if img_el else ""
+                    title_el = card.select_one('[class*="title" i], [class*="name" i], h3, p')
+                    title = title_el.get_text(strip=True)[:80] if title_el else keyword.title()
+                    aud = round(price_jpy / JPY_PER_AUD)
+                    item_url = f"https://buyee.jp{href}" if href.startswith("/") else href
+                    source = "Buyee (Mercari JP)" if "/mercari/" in href else "Buyee (Yahoo JP)"
+                    out.append({
+                        "brand": "", "item": title, "desc": "", "size": "Check listing",
+                        "origPrice": f"¥{price_jpy:,.0f}", "aud": aud, "under": aud < 250,
+                        "site": source, "url": item_url, "rep": "auth",
+                        "notes": f"¥{price_jpy:,.0f} JPY (~AUD {aud}). Buy via Buyee proxy (+5-10% commission). JP sizing.",
+                        "image": img,
+                    })
+                except Exception:
+                    continue
+            if out:
+                print(f"Buyee requests: {len(out)} items")
+                return out[:12]
+    except Exception as e:
+        print(f"Buyee requests error: {e}")
+    return []
+
+
 async def scrape_buyee(keyword: str, max_usd: float) -> list:
     max_jpy = round(max_usd * USD_TO_AUD * JPY_PER_AUD)
     q = urllib.parse.quote_plus(keyword)
+
+    # Fast requests attempt first
+    loop = asyncio.get_event_loop()
+    fast = await loop.run_in_executor(None, _fetch_buyee_requests, keyword, max_jpy)
+    if fast:
+        return fast
+
+    print("Buyee: falling back to Playwright")
     url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
     try:
         async with async_playwright() as p:
@@ -534,38 +603,62 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             )
             page = await ctx.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            # wait for item cards to appear instead of networkidle (Buyee never goes idle)
             try:
-                await page.wait_for_selector('a[href*="/item/"]', timeout=20000)
+                await page.wait_for_selector('.itemCard, [class*="itemCard"], [class*="item-card"]', timeout=20000)
             except Exception:
                 pass
-            await page.wait_for_timeout(4000)
+            await page.wait_for_timeout(3000)
 
             cards = await page.evaluate("""
                 () => {
                     const results = [], seen = new Set();
-                    let anchors = Array.from(document.querySelectorAll(
-                        'a[href*="/item/jdirectitems/"], a[href*="/mercari/item/m"]'
-                    ));
-                    if (anchors.length === 0) {
-                        anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
-                            .filter(a => a.href && !a.href.includes('/search/') && !a.href.includes('/category/'));
+                    // Try class-based card selectors first
+                    const cardSels = ['.itemCard','[class*="itemCard"]','[class*="item-card"]','.js-item'];
+                    let cardEls = [];
+                    for (const s of cardSels) {
+                        cardEls = Array.from(document.querySelectorAll(s));
+                        if (cardEls.length > 2) break;
                     }
+                    if (cardEls.length > 2) {
+                        for (const card of cardEls) {
+                            const link = card.querySelector('a[href*="/item/"]');
+                            if (!link) continue;
+                            const href = link.getAttribute('href') || link.href || '';
+                            if (!href || seen.has(href)) continue;
+                            seen.add(href);
+                            const txt = card.innerText || '';
+                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
+                            const price = m ? m[0] : '';
+                            const imgEl = card.querySelector('img[src]');
+                            const img = imgEl ? imgEl.src : '';
+                            const lines = txt.split('\\n').map(l => l.trim())
+                                .filter(l => l.length > 4 && l.length < 120 && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
+                            const title = lines[0] || '';
+                            if (price) results.push({ href, price, img, title });
+                        }
+                        if (results.length) return results;
+                    }
+                    // Fallback: anchor scan with broader price regex
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
+                        .filter(a => {
+                            const h = a.href || '';
+                            return !h.includes('/search/') && !h.includes('/category/')
+                                && !h.includes('/help/') && !h.includes('/mypage/');
+                        });
                     for (const a of anchors) {
                         const href = a.getAttribute('href') || a.href || '';
                         if (!href || seen.has(href)) continue;
                         seen.add(href);
                         let node = a, price = '', img = '', title = '';
-                        for (let i = 0; i < 12; i++) {
+                        for (let i = 0; i < 15; i++) {
                             if (!node) break;
                             const txt = node.innerText || '';
-                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
+                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
                             if (m) {
                                 price = m[0];
                                 const imgEl = node.querySelector('img[src]');
                                 img = imgEl ? imgEl.src : '';
-                                const lines = txt.split('\\n')
-                                    .map(l => l.trim())
+                                const lines = txt.split('\\n').map(l => l.trim())
                                     .filter(l => l.length > 5 && l.length < 120
                                         && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
                                 title = lines[0] || '';
@@ -580,10 +673,10 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
             """)
             await browser.close()
     except Exception as e:
-        print(f"Buyee error: {e}")
+        print(f"Buyee Playwright error: {e}")
         return []
 
-    print(f"Buyee raw cards: {len(cards)}")
+    print(f"Buyee Playwright raw cards: {len(cards)}")
     out = []
     for c in cards:
         try:
