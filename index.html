@@ -124,6 +124,30 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
   margin-right:6px; vertical-align:middle;
 }
 
+/* ── Keyword Suggestions ───────────────────────────────────────────────────── */
+.kw-suggestions {
+  display:flex; flex-wrap:wrap; gap:7px; align-items:center;
+  padding:12px 0 14px; border-bottom:1px solid #f0f0f0; margin-bottom:14px;
+}
+.kw-label {
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.07em;
+  color:#999; font-weight:600; margin-right:2px; flex-shrink:0;
+}
+.kw-chip {
+  padding:5px 11px; border:1px solid #e0e0e0; background:#f7f7f7;
+  border-radius:999px; font:inherit; font-size:11.5px; color:#444;
+  cursor:pointer; transition:background .1s, border-color .1s, color .1s;
+  white-space:nowrap;
+}
+.kw-chip:hover { background:#111; color:#fff; border-color:#111; }
+.kw-rand-btn {
+  padding:5px 13px; border:1.5px solid #111; background:#fff;
+  border-radius:999px; font:700 11.5px/1 inherit; color:#111;
+  cursor:pointer; transition:background .1s, color .1s;
+  white-space:nowrap; flex-shrink:0;
+}
+.kw-rand-btn:hover { background:#111; color:#fff; }
+
 /* ── SHOW THE BROS button ──────────────────────────────────────────────────── */
 .show-bros-btn {
   display:block; width:100%; margin-top:8px;
@@ -299,6 +323,11 @@ footer { margin-top:40px; padding-top:20px; border-top:1px solid #e5e5e5; font-s
     <button class="run-btn" id="runBtn" onclick="runScrape()">Scrape</button>
   </div>
 
+  <!-- Keyword suggestions -->
+  <div class="kw-suggestions" id="kwSuggestions">
+    <span class="kw-label">Try:</span>
+  </div>
+
   <div class="site-chips">
     <span style="font-size:11px;color:#888;align-self:center;margin-right:2px;">Sites:</span>
     <span class="chip active" data-site="grailed" onclick="toggleSite(this)">Grailed</span>
@@ -428,6 +457,54 @@ function cardHTML(it) {
   </div>`;
 }
 
+
+// ── Keyword Suggestions ───────────────────────────────────────────────────────
+const KW_SUGGESTIONS = [
+  // Rick Owens
+  'rick owens jacket', 'rick owens boots', 'rick owens drkshdw', 'rick owens coat',
+  // Helmut Lang
+  'helmut lang archive', 'helmut lang jacket', 'helmut lang denim',
+  // Raf Simons
+  'raf simons denim', 'raf simons jacket', 'raf simons bomber',
+  // Japanese designers
+  'undercover jacket', 'undercover coat', 'number nine coat', 'number nine jacket',
+  'julius jacket', 'yohji yamamoto coat', 'yohji yamamoto jacket',
+  'comme des garcons', 'junya watanabe denim', 'issey miyake pleats',
+  'if six was nine', 'attachment kazuyuki kumagai',
+  // Belgian / dark European
+  'ann demeulemeester', 'boris bidjan saberi', 'dries van noten', 'carol christian poell',
+  // Others
+  'maison margiela coat', 'margiela tabi boots', 'stone island shadow',
+  'maharishi cargo', 'guidi shoes', 'devoa jacket', 'alyx coat', 'chrome hearts',
+];
+
+function useKw(kw) {
+  document.getElementById('scrapeKeyword').value = kw;
+  document.getElementById('scrapeKeyword').focus();
+}
+
+function randomKw() {
+  const kw = KW_SUGGESTIONS[Math.floor(Math.random() * KW_SUGGESTIONS.length)];
+  useKw(kw);
+}
+
+(function buildSuggestions() {
+  const container = document.getElementById('kwSuggestions');
+  // Show a rotating subset of 14 + the random button so it doesn't overflow
+  const subset = [...KW_SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 14);
+  subset.forEach(kw => {
+    const btn = document.createElement('button');
+    btn.className = 'kw-chip';
+    btn.textContent = kw;
+    btn.onclick = () => useKw(kw);
+    container.appendChild(btn);
+  });
+  const rand = document.createElement('button');
+  rand.className = 'kw-rand-btn';
+  rand.textContent = '? Random';
+  rand.onclick = randomKw;
+  container.appendChild(rand);
+})();
 
 // ── Scrape Panel ──────────────────────────────────────────────────────────────
 let scrapeFilter = 'all';
