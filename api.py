@@ -35,6 +35,10 @@ BROWSER_ARGS = [
     "--disable-gpu", "--no-first-run", "--no-zygote", "--single-process",
 ]
 
+# Only 1 Playwright/Chromium instance at a time — Render free tier has 512MB RAM
+# and 2+ simultaneous browsers will OOM-crash the whole server (502 for everyone)
+_BROWSER_SEM = asyncio.Semaphore(1)
+
 # ── eBay keyword filter (only used there to cut noise) ─────────────────────────
 
 _STOP = {"a","an","the","and","or","for","in","on","at","to","of","is","it","its","with","by","from","s"}
@@ -143,48 +147,48 @@ async def _grailed_playwright(keyword: str, max_usd: float) -> list:
     slug = urllib.parse.quote_plus(keyword)
     url = f"https://www.grailed.com/shop?query={slug}"
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-            ctx = await browser.new_context(user_agent=UA, locale="en-US")
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_selector('a[href*="/listings/"]', timeout=15000)
-            except Exception:
-                pass
-            await page.wait_for_timeout(3000)
-
-            cards = await page.evaluate("""
-                () => {
-                    const anchors = Array.from(document.querySelectorAll('a[href*="/listings/"]'));
-                    const results = [];
-                    const seen = new Set();
-                    for (const a of anchors) {
-                        const href = a.href || '';
-                        const m = href.match(/\\/listings\\/(\\d+)/);
-                        if (!m || seen.has(m[1])) continue;
-                        seen.add(m[1]);
-                        let node = a, price = '', img = '', title = '';
-                        for (let i = 0; i < 8; i++) {
-                            if (!node) break;
-                            const spans = Array.from(node.querySelectorAll('span'))
-                                .filter(s => s.textContent.includes('$') && s.textContent.trim().length < 20);
-                            if (spans.length) {
-                                price = spans[0].textContent.trim();
-                                const imgEl = node.querySelector('img');
-                                img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
-                                const titleEl = node.querySelector('p,h3,h4,[class*="title"],[class*="Title"]');
-                                title = titleEl ? titleEl.textContent.trim() : '';
-                                break;
+        async with _BROWSER_SEM:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+                ctx = await browser.new_context(user_agent=UA, locale="en-US")
+                page = await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                try:
+                    await page.wait_for_selector('a[href*="/listings/"]', timeout=15000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(3000)
+                cards = await page.evaluate("""
+                    () => {
+                        const anchors = Array.from(document.querySelectorAll('a[href*="/listings/"]'));
+                        const results = [];
+                        const seen = new Set();
+                        for (const a of anchors) {
+                            const href = a.href || '';
+                            const m = href.match(/\\/listings\\/(\\d+)/);
+                            if (!m || seen.has(m[1])) continue;
+                            seen.add(m[1]);
+                            let node = a, price = '', img = '', title = '';
+                            for (let i = 0; i < 8; i++) {
+                                if (!node) break;
+                                const spans = Array.from(node.querySelectorAll('span'))
+                                    .filter(s => s.textContent.includes('$') && s.textContent.trim().length < 20);
+                                if (spans.length) {
+                                    price = spans[0].textContent.trim();
+                                    const imgEl = node.querySelector('img');
+                                    img = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
+                                    const titleEl = node.querySelector('p,h3,h4,[class*="title"],[class*="Title"]');
+                                    title = titleEl ? titleEl.textContent.trim() : '';
+                                    break;
+                                }
+                                node = node.parentElement;
                             }
-                            node = node.parentElement;
+                            results.push({ href, id: m[1], price, img, title });
                         }
-                        results.push({ href, id: m[1], price, img, title });
+                        return results;
                     }
-                    return results;
-                }
-            """)
-            await browser.close()
+                """)
+                await browser.close()
     except Exception as e:
         print(f"Grailed Playwright fallback error: {e}")
         return []
@@ -308,11 +312,10 @@ def _fetch_depop(keyword: str, max_usd: float) -> list:
 
 
 async def scrape_depop(keyword: str, max_usd: float) -> list:
+    # API-only — Playwright fallback removed because Render IPs are blocked by Depop
+    # and launching a second browser alongside Buyee/Yahoo JP crashes the server (OOM)
     loop = asyncio.get_event_loop()
-    results = await loop.run_in_executor(None, _fetch_depop, keyword, max_usd)
-    if results:
-        return results
-    return await _depop_playwright(keyword, max_usd)
+    return await loop.run_in_executor(None, _fetch_depop, keyword, max_usd)
 
 
 async def _depop_playwright(keyword: str, max_usd: float) -> list:
@@ -591,87 +594,85 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
     print("Buyee: falling back to Playwright")
     url = f"https://buyee.jp/item/search/query/{q}?translationType=1"
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=BROWSER_ARGS + ["--disable-blink-features=AutomationControlled"],
-            )
-            ctx = await browser.new_context(user_agent=UA, locale="en-US")
-            await ctx.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-                "window.chrome={runtime:{}};"
-            )
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                await page.wait_for_selector('.itemCard, [class*="itemCard"], [class*="item-card"]', timeout=20000)
-            except Exception:
-                pass
-            await page.wait_for_timeout(3000)
-
-            cards = await page.evaluate("""
-                () => {
-                    const results = [], seen = new Set();
-                    // Try class-based card selectors first
-                    const cardSels = ['.itemCard','[class*="itemCard"]','[class*="item-card"]','.js-item'];
-                    let cardEls = [];
-                    for (const s of cardSels) {
-                        cardEls = Array.from(document.querySelectorAll(s));
-                        if (cardEls.length > 2) break;
-                    }
-                    if (cardEls.length > 2) {
-                        for (const card of cardEls) {
-                            const link = card.querySelector('a[href*="/item/"]');
-                            if (!link) continue;
-                            const href = link.getAttribute('href') || link.href || '';
+        async with _BROWSER_SEM:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=BROWSER_ARGS + ["--disable-blink-features=AutomationControlled"],
+                )
+                ctx = await browser.new_context(user_agent=UA, locale="en-US")
+                await ctx.add_init_script(
+                    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+                    "window.chrome={runtime:{}};"
+                )
+                page = await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                try:
+                    await page.wait_for_selector('.itemCard, [class*="itemCard"], [class*="item-card"]', timeout=20000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(3000)
+                cards = await page.evaluate("""
+                    () => {
+                        const results = [], seen = new Set();
+                        const cardSels = ['.itemCard','[class*="itemCard"]','[class*="item-card"]','.js-item'];
+                        let cardEls = [];
+                        for (const s of cardSels) {
+                            cardEls = Array.from(document.querySelectorAll(s));
+                            if (cardEls.length > 2) break;
+                        }
+                        if (cardEls.length > 2) {
+                            for (const card of cardEls) {
+                                const link = card.querySelector('a[href*="/item/"]');
+                                if (!link) continue;
+                                const href = link.getAttribute('href') || link.href || '';
+                                if (!href || seen.has(href)) continue;
+                                seen.add(href);
+                                const txt = card.innerText || '';
+                                const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
+                                const price = m ? m[0] : '';
+                                const imgEl = card.querySelector('img[src]');
+                                const img = imgEl ? imgEl.src : '';
+                                const lines = txt.split('\\n').map(l => l.trim())
+                                    .filter(l => l.length > 4 && l.length < 120 && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
+                                const title = lines[0] || '';
+                                if (price) results.push({ href, price, img, title });
+                            }
+                            if (results.length) return results;
+                        }
+                        const anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
+                            .filter(a => {
+                                const h = a.href || '';
+                                return !h.includes('/search/') && !h.includes('/category/')
+                                    && !h.includes('/help/') && !h.includes('/mypage/');
+                            });
+                        for (const a of anchors) {
+                            const href = a.getAttribute('href') || a.href || '';
                             if (!href || seen.has(href)) continue;
                             seen.add(href);
-                            const txt = card.innerText || '';
-                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
-                            const price = m ? m[0] : '';
-                            const imgEl = card.querySelector('img[src]');
-                            const img = imgEl ? imgEl.src : '';
-                            const lines = txt.split('\\n').map(l => l.trim())
-                                .filter(l => l.length > 4 && l.length < 120 && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
-                            const title = lines[0] || '';
+                            let node = a, price = '', img = '', title = '';
+                            for (let i = 0; i < 15; i++) {
+                                if (!node) break;
+                                const txt = node.innerText || '';
+                                const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
+                                if (m) {
+                                    price = m[0];
+                                    const imgEl = node.querySelector('img[src]');
+                                    img = imgEl ? imgEl.src : '';
+                                    const lines = txt.split('\\n').map(l => l.trim())
+                                        .filter(l => l.length > 5 && l.length < 120
+                                            && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
+                                    title = lines[0] || '';
+                                    break;
+                                }
+                                node = node.parentElement;
+                            }
                             if (price) results.push({ href, price, img, title });
                         }
-                        if (results.length) return results;
+                        return results;
                     }
-                    // Fallback: anchor scan with broader price regex
-                    const anchors = Array.from(document.querySelectorAll('a[href*="/item/"]'))
-                        .filter(a => {
-                            const h = a.href || '';
-                            return !h.includes('/search/') && !h.includes('/category/')
-                                && !h.includes('/help/') && !h.includes('/mypage/');
-                        });
-                    for (const a of anchors) {
-                        const href = a.getAttribute('href') || a.href || '';
-                        if (!href || seen.has(href)) continue;
-                        seen.add(href);
-                        let node = a, price = '', img = '', title = '';
-                        for (let i = 0; i < 15; i++) {
-                            if (!node) break;
-                            const txt = node.innerText || '';
-                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円|JPY\\s*[\\d,]+/);
-                            if (m) {
-                                price = m[0];
-                                const imgEl = node.querySelector('img[src]');
-                                img = imgEl ? imgEl.src : '';
-                                const lines = txt.split('\\n').map(l => l.trim())
-                                    .filter(l => l.length > 5 && l.length < 120
-                                        && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
-                                title = lines[0] || '';
-                                break;
-                            }
-                            node = node.parentElement;
-                        }
-                        if (price) results.push({ href, price, img, title });
-                    }
-                    return results;
-                }
-            """)
-            await browser.close()
+                """)
+                await browser.close()
     except Exception as e:
         print(f"Buyee Playwright error: {e}")
         return []
@@ -713,48 +714,49 @@ async def scrape_buyee(keyword: str, max_usd: float) -> list:
 
 async def _yahoo_fetch_url(url: str) -> list:
     """Run one Yahoo JP Playwright fetch, return raw card dicts."""
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
-        ctx = await browser.new_context(user_agent=UA, locale="en-US")
-        page = await ctx.new_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        try:
-            await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=15000)
-        except Exception:
-            pass
-        await page.wait_for_timeout(4000)
-        cards = await page.evaluate("""
-            () => {
-                const results = [], seen = new Set();
-                const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
-                for (const a of anchors) {
-                    const href = a.href || a.getAttribute('href') || '';
-                    if (!href || seen.has(href)) continue;
-                    seen.add(href);
-                    let node = a, price = '', img = '', title = '';
-                    for (let i = 0; i < 12; i++) {
-                        if (!node) break;
-                        const txt = node.innerText || '';
-                        const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
-                        if (m) {
-                            price = m[0];
-                            const imgEl = node.querySelector('img[src]');
-                            img = imgEl ? imgEl.src : '';
-                            const lines = txt.split('\\n')
-                                .map(l => l.trim())
-                                .filter(l => l.length > 3 && l.length < 120
-                                    && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
-                            title = lines[0] || '';
-                            break;
+    async with _BROWSER_SEM:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+            ctx = await browser.new_context(user_agent=UA, locale="en-US")
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            try:
+                await page.wait_for_selector('a[href*="/jp/auction/"]', timeout=15000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(4000)
+            cards = await page.evaluate("""
+                () => {
+                    const results = [], seen = new Set();
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/jp/auction/"]'));
+                    for (const a of anchors) {
+                        const href = a.href || a.getAttribute('href') || '';
+                        if (!href || seen.has(href)) continue;
+                        seen.add(href);
+                        let node = a, price = '', img = '', title = '';
+                        for (let i = 0; i < 12; i++) {
+                            if (!node) break;
+                            const txt = node.innerText || '';
+                            const m = txt.match(/[¥￥][\\d,]+|[\\d,]{3,}円/);
+                            if (m) {
+                                price = m[0];
+                                const imgEl = node.querySelector('img[src]');
+                                img = imgEl ? imgEl.src : '';
+                                const lines = txt.split('\\n')
+                                    .map(l => l.trim())
+                                    .filter(l => l.length > 3 && l.length < 120
+                                        && !/[¥￥]/.test(l) && !/^[\\d,]+$/.test(l));
+                                title = lines[0] || '';
+                                break;
+                            }
+                            node = node.parentElement;
                         }
-                        node = node.parentElement;
+                        if (price) results.push({ href, price, img, title });
                     }
-                    if (price) results.push({ href, price, img, title });
+                    return results;
                 }
-                return results;
-            }
-        """)
-        await browser.close()
+            """)
+            await browser.close()
     return cards
 
 
